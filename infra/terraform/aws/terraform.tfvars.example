@@ -1,0 +1,9 @@
+aws_region               = "us-east-1"
+project_name             = "jenkins-pipeline"
+environment              = "prod"
+admin_cidrs              = ["203.0.113.10/32"]
+key_pair_name            = "jenkins-pipeline-key"
+jenkins_instance_type    = "t3.medium"
+deploy_instance_type     = "t3.small"
+monitoring_instance_type = "t3.small"   # hosts Prometheus + Alertmanager + Grafana
+ecr_repository_name      = "secure-flask-app"

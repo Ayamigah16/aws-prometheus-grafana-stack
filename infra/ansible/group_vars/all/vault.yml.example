@@ -1,0 +1,13 @@
+# Copy to vault.yml and encrypt with:
+# ansible-vault encrypt infra/ansible/group_vars/all/vault.yml
+vault_jenkins_admin_password: "REPLACE_ME"
+
+# Grafana admin password
+vault_grafana_admin_password: "REPLACE_ME"
+
+# Alertmanager — Slack incoming webhook URL
+vault_alertmanager_slack_webhook_url: "https://hooks.slack.com/services/REPLACE/ME"
+
+# Alertmanager — SMTP credentials for email notifications
+vault_alertmanager_smtp_username: "REPLACE_ME"
+vault_alertmanager_smtp_password: "REPLACE_ME"

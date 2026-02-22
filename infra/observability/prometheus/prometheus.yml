@@ -1,0 +1,48 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    project: aws-prometheus-grafana-stack
+    environment: production
+
+# ---------------------------------------------------------------------------
+# Alertmanager integration — centralized routing, deduplication, escalation
+# ---------------------------------------------------------------------------
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+      - localhost:9093
+
+rule_files:
+- /etc/prometheus/alert_rules.yml
+
+scrape_configs:
+- job_name: prometheus
+  static_configs:
+  - targets:
+    - localhost:9090
+
+- job_name: python-app
+  metrics_path: /metrics
+  scheme: http
+  static_configs:
+  - targets:
+    - APP_EC2_PRIVATE_IP:3000
+    labels:
+      service: flask-app
+      tier: application
+
+- job_name: node-exporter
+  static_configs:
+  - targets:
+    - APP_EC2_PRIVATE_IP:9100
+    labels:
+      service: ec2-host
+      tier: infrastructure
+
+# Self-monitoring: track Alertmanager availability
+- job_name: alertmanager
+  static_configs:
+  - targets:
+    - localhost:9093

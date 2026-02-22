@@ -1,0 +1,203 @@
+- name: Install Java 17
+  ansible.builtin.yum:
+    name: java-17-amazon-corretto
+    state: present
+
+- name: Validate Jenkins admin password is overridden
+  ansible.builtin.assert:
+    that:
+      - jenkins_admin_password is defined
+      - jenkins_admin_password | length > 0
+      - jenkins_admin_password != "CHANGE_ME_STRONG_PASSWORD"
+    fail_msg: "Set vault_jenkins_admin_password in infra/ansible/group_vars/all/vault.yml (encrypted) or export JENKINS_ADMIN_PASSWORD."
+
+- name: Add Jenkins repository
+  ansible.builtin.get_url:
+    url: https://pkg.jenkins.io/redhat-stable/jenkins.repo
+    dest: /etc/yum.repos.d/jenkins.repo
+    mode: "0644"
+
+- name: Import Jenkins package signing key
+  ansible.builtin.rpm_key:
+    key: https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+    state: present
+
+- name: Install Jenkins package
+  ansible.builtin.yum:
+    name: jenkins
+    state: present
+
+- name: Add Trivy repository
+  ansible.builtin.copy:
+    dest: /etc/yum.repos.d/trivy.repo
+    mode: "0644"
+    content: |
+      [trivy]
+      name=Trivy repository
+      baseurl=https://aquasecurity.github.io/trivy-repo/rpm/releases/$basearch/
+      gpgcheck=0
+      enabled=1
+
+- name: Install Docker and dependencies
+  ansible.builtin.yum:
+    name:
+      - docker
+      - shadow-utils
+      - trivy
+    state: present
+
+- name: Ensure Docker is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Ensure Jenkins service is running
+  ansible.builtin.service:
+    name: jenkins
+    state: started
+    enabled: true
+
+- name: Add jenkins service user to docker group
+  ansible.builtin.user:
+    name: jenkins
+    groups: docker
+    append: true
+
+- name: Add ansible user to docker group
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: true
+
+- name: Set Jenkins HTTP port
+  ansible.builtin.lineinfile:
+    path: /etc/sysconfig/jenkins
+    regexp: '^JENKINS_PORT='
+    line: "JENKINS_PORT={{ jenkins_http_port }}"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Disable Jenkins setup wizard
+  ansible.builtin.lineinfile:
+    path: /etc/sysconfig/jenkins
+    regexp: '^JENKINS_JAVA_OPTIONS='
+    line: 'JENKINS_JAVA_OPTIONS="-Djava.awt.headless=true -Djenkins.install.runSetupWizard=false"'
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Ensure Jenkins paths are owned by jenkins user
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0755"
+    recurse: true
+  loop:
+    - /var/lib/jenkins
+    - /var/log/jenkins
+    - /var/cache/jenkins
+
+- name: Write plugin list
+  ansible.builtin.copy:
+    dest: /var/lib/jenkins/plugins.txt
+    mode: "0644"
+    owner: jenkins
+    group: jenkins
+    content: |
+      {% for plugin in jenkins_plugins %}
+      {{ plugin }}
+      {% endfor %}
+
+- name: Check Jenkins WAR path (/usr/lib/jenkins/jenkins.war)
+  ansible.builtin.stat:
+    path: /usr/lib/jenkins/jenkins.war
+  register: jenkins_war_primary
+
+- name: Check Jenkins WAR path (/usr/share/java/jenkins.war)
+  ansible.builtin.stat:
+    path: /usr/share/java/jenkins.war
+  register: jenkins_war_fallback
+
+- name: Set Jenkins WAR path fact
+  ansible.builtin.set_fact:
+    jenkins_war_path: >-
+      {{ '/usr/lib/jenkins/jenkins.war'
+         if jenkins_war_primary.stat.exists
+         else '/usr/share/java/jenkins.war' }}
+
+- name: Ensure Jenkins WAR is present
+  ansible.builtin.assert:
+    that:
+      - jenkins_war_primary.stat.exists or jenkins_war_fallback.stat.exists
+    fail_msg: "Jenkins WAR not found in /usr/lib/jenkins or /usr/share/java."
+
+- name: Ensure plugin manager directory exists
+  ansible.builtin.file:
+    path: /opt/jenkins
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download Jenkins plugin manager JAR fallback
+  ansible.builtin.get_url:
+    url: https://repo.jenkins-ci.org/releases/io/jenkins/plugin-management/plugin-management-cli/2.13.0/plugin-management-cli-2.13.0.jar
+    dest: /opt/jenkins/jenkins-plugin-manager.jar
+    mode: "0755"
+
+- name: Stop Jenkins before offline plugin installation
+  ansible.builtin.service:
+    name: jenkins
+    state: stopped
+
+- name: Install Jenkins plugins
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if command -v jenkins-plugin-cli >/dev/null 2>&1; then
+      jenkins-plugin-cli \
+        --plugin-file /var/lib/jenkins/plugins.txt \
+        --plugin-download-directory /var/lib/jenkins/plugins \
+        --clean-download-directory \
+        --latest true
+    else
+      java -jar /opt/jenkins/jenkins-plugin-manager.jar \
+        --war "${JENKINS_WAR_PATH}" \
+        --plugin-file /var/lib/jenkins/plugins.txt \
+        --plugin-download-directory /var/lib/jenkins/plugins \
+        --clean-download-directory \
+        --latest true
+    fi
+  args:
+    executable: /bin/bash
+  become_user: jenkins
+  environment:
+    JENKINS_WAR_PATH: "{{ jenkins_war_path }}"
+  register: plugin_install
+  changed_when: "'No updates' not in plugin_install.stdout"
+
+- name: Ensure init.groovy.d exists
+  ansible.builtin.file:
+    path: /var/lib/jenkins/init.groovy.d
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0755"
+
+- name: Seed admin user creation script
+  ansible.builtin.template:
+    src: admin-user.groovy.j2
+    dest: /var/lib/jenkins/init.groovy.d/basic-security.groovy
+    owner: jenkins
+    group: jenkins
+    mode: "0600"
+
+- name: Restart Jenkins after configuration
+  ansible.builtin.service:
+    name: jenkins
+    state: restarted

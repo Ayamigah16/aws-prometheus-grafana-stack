@@ -1,0 +1,82 @@
+global:
+  resolve_timeout: 5m
+  smtp_from: alerts@example.com
+  smtp_smarthost: smtp.example.com:587
+  smtp_auth_username: REPLACE_ME
+  smtp_auth_password: REPLACE_ME
+  smtp_require_tls: true
+
+  # Slack webhook — replace with your real incoming webhook URL.
+  slack_api_url: https://hooks.slack.com/services/REPLACE/ME
+
+# ---------------------------------------------------------------------------
+# Routing tree
+#
+# Design rationale:
+#   - warning severity → #alerts-warning (non-urgent channel, lower noise)
+#   - critical severity → #alerts-critical AND email oncall (dual escalation)
+#   - continue: true on the Slack critical route ensures both receivers fire
+#   - Alerts are grouped by alertname+service+severity to reduce Slack noise
+#   - Inhibit rules silence warnings when a critical already covers the target
+# ---------------------------------------------------------------------------
+route:
+  receiver: slack-warning
+  group_by: [ "alertname", "service", "severity" ]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+  - matchers:
+    - severity = "critical"
+    receiver: slack-critical
+    continue: true
+
+  - matchers:
+    - severity = "critical"
+    receiver: email-oncall
+
+receivers:
+- name: slack-warning
+  slack_configs:
+  - channel: "#alerts-warning"
+    send_resolved: true
+    title: >-
+      [{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}
+    text: |
+      {{ range .Alerts }}
+      *Alert:* {{ .Labels.alertname }} ({{ .Labels.severity }})
+      *Summary:* {{ .Annotations.summary }}
+      *Description:* {{ .Annotations.description }}
+      *Instance:* {{ .Labels.instance }}
+      {{ end }}
+
+- name: slack-critical
+  slack_configs:
+  - channel: "#alerts-critical"
+    send_resolved: true
+    title: >-
+      [CRITICAL{{ if eq .Status "resolved" }} RESOLVED{{ end }}] {{ .CommonLabels.alertname }}
+    text: |
+      {{ range .Alerts }}
+      *Description:* {{ .Annotations.description }}
+      *Instance:* {{ .Labels.instance }}
+      {{ end }}
+    color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+
+- name: email-oncall
+  email_configs:
+  - to: oncall@example.com
+    send_resolved: true
+    headers:
+      Subject: "[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}"
+
+inhibit_rules:
+# Suppress a warning if a critical alert fires for the same alertname+instance.
+- source_matchers:
+  - severity = "critical"
+  target_matchers:
+  - severity = "warning"
+  equal:
+  - alertname
+  - instance

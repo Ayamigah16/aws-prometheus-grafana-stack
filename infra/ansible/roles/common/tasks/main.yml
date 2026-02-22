@@ -1,0 +1,16 @@
+- name: Update OS packages
+  ansible.builtin.yum:
+    name: "*"
+    state: latest
+    update_cache: true
+
+- name: Install baseline tooling
+  ansible.builtin.yum:
+    name:
+      - git
+      - unzip
+      - curl
+      - jq
+      - python3
+      - awscli
+    state: present

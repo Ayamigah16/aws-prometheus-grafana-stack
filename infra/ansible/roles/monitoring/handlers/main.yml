@@ -1,0 +1,19 @@
+---
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart prometheus
+  ansible.builtin.service:
+    name: prometheus
+    state: restarted
+
+- name: Restart alertmanager
+  ansible.builtin.service:
+    name: alertmanager
+    state: restarted
+
+- name: Restart grafana
+  ansible.builtin.service:
+    name: grafana-server
+    state: restarted

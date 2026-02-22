@@ -1,0 +1,48 @@
+---
+# Prometheus version and binary configuration
+prometheus_version: "2.50.1"
+prometheus_user: prometheus
+prometheus_group: prometheus
+prometheus_install_dir: /usr/local/bin
+prometheus_config_dir: /etc/prometheus
+prometheus_data_dir: /var/lib/prometheus
+prometheus_retention_time: "15d"
+
+# Alertmanager version and configuration
+alertmanager_version: "0.27.0"
+alertmanager_user: alertmanager
+alertmanager_group: alertmanager
+alertmanager_install_dir: /usr/local/bin
+alertmanager_config_dir: /etc/alertmanager
+alertmanager_data_dir: /var/lib/alertmanager
+
+# Grafana
+grafana_port: 3000
+grafana_admin_user: admin
+grafana_admin_password: "{{ vault_grafana_admin_password }}"
+
+# Node Exporter (installed on deploy/app host via the deploy role)
+node_exporter_version: "1.7.0"
+node_exporter_user: node_exporter
+node_exporter_group: node_exporter
+
+# Scrape targets — these are populated from Terraform outputs via env vars
+# Override at inventory/group_vars level with real private IPs.
+prometheus_scrape_app_host: "{{ lookup('env', 'DEPLOY_HOST_IP') }}"
+prometheus_scrape_app_port: 3000
+prometheus_scrape_node_exporter_port: 9100
+
+# Alertmanager notification config (secrets from Vault)
+alertmanager_slack_webhook_url: "{{ vault_alertmanager_slack_webhook_url }}"
+alertmanager_slack_channel_warning: "#alerts-warning"
+alertmanager_slack_channel_critical: "#alerts-critical"
+alertmanager_smtp_from: "alerts@example.com"
+alertmanager_smtp_smarthost: "smtp.example.com:587"
+alertmanager_smtp_username: "{{ vault_alertmanager_smtp_username }}"
+alertmanager_smtp_password: "{{ vault_alertmanager_smtp_password }}"
+alertmanager_email_oncall: "oncall@example.com"
+
+# Alert thresholds
+alert_error_rate_threshold: 5
+alert_latency_p95_threshold: 0.5
+alert_cpu_threshold: 80

@@ -1,0 +1,37 @@
+- name: Common baseline
+  hosts: all
+  become: true
+  vars_files:
+    - ../group_vars/all.yml
+    - ../group_vars/all/vault.yml
+  roles:
+    - common
+
+- name: Configure Jenkins host
+  hosts: jenkins
+  become: true
+  vars_files:
+    - ../group_vars/all.yml
+    - ../group_vars/all/vault.yml
+  roles:
+    - jenkins
+
+- name: Configure deployment host
+  hosts: deploy
+  become: true
+  vars_files:
+    - ../group_vars/all.yml
+    - ../group_vars/all/vault.yml
+  roles:
+    - deploy
+    - node_exporter
+
+- name: Configure monitoring host
+  hosts: monitoring
+  become: true
+  vars_files:
+    - ../group_vars/all.yml
+    - ../group_vars/all/vault.yml
+  roles:
+    - common
+    - monitoring

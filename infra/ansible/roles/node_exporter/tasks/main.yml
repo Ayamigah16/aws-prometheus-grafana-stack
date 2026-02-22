@@ -1,0 +1,77 @@
+---
+# node_exporter role — installs Prometheus Node Exporter on the deploy/app host
+# so Prometheus can scrape EC2 host metrics (CPU, memory, disk, network).
+
+- name: Create node_exporter system group
+  ansible.builtin.group:
+    name: "{{ node_exporter_group }}"
+    system: true
+    state: present
+
+- name: Create node_exporter system user
+  ansible.builtin.user:
+    name: "{{ node_exporter_user }}"
+    group: "{{ node_exporter_group }}"
+    system: true
+    shell: /sbin/nologin
+    create_home: false
+
+- name: Download Node Exporter archive
+  ansible.builtin.get_url:
+    url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/node_exporter-{{ node_exporter_version }}.tar.gz"
+    mode: "0644"
+  register: node_exporter_download
+
+- name: Extract Node Exporter
+  ansible.builtin.unarchive:
+    src: "/tmp/node_exporter-{{ node_exporter_version }}.tar.gz"
+    dest: /tmp
+    remote_src: true
+  when: node_exporter_download.changed  # noqa: no-handler
+
+- name: Install Node Exporter binary
+  ansible.builtin.copy:
+    src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+    dest: /usr/local/bin/node_exporter
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: true
+  notify: Restart node_exporter
+
+- name: Install Node Exporter systemd unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/node_exporter.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Prometheus Node Exporter
+      Documentation=https://prometheus.io/docs/guides/node-exporter/
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=simple
+      User={{ node_exporter_user }}
+      Group={{ node_exporter_group }}
+      ExecStart=/usr/local/bin/node_exporter
+      Restart=on-failure
+      RestartSec=5s
+      NoNewPrivileges=true
+      ProtectHome=true
+      ProtectSystem=full
+
+      [Install]
+      WantedBy=multi-user.target
+  notify:
+    - Reload systemd node_exporter
+    - Restart node_exporter
+
+- name: Enable and start Node Exporter
+  ansible.builtin.service:
+    name: node_exporter
+    state: started
+    enabled: true

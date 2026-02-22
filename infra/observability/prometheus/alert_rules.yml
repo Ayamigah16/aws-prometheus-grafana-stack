@@ -1,0 +1,66 @@
+groups:
+- name: app_and_host_alerts
+  rules:
+  - alert: HighErrorRate
+    expr: |
+      (
+        sum(rate(http_requests_total{job="python-app",status=~"5.."}[5m]))
+        /
+        sum(rate(http_requests_total{job="python-app"}[5m]))
+      ) * 100 > 5
+    for: 5m
+    labels:
+      severity: critical
+      owner: platform
+    annotations:
+      summary: "High application error rate (>5%)"
+      description: "5xx error percentage has exceeded 5% for at least 5 minutes."
+
+  - alert: HighLatencyP95
+    expr: |
+      histogram_quantile(
+        0.95,
+        sum(rate(http_request_duration_seconds_bucket{job="python-app"}[5m])) by (le)
+      ) > 0.5
+    for: 10m
+    labels:
+      severity: warning
+      owner: platform
+    annotations:
+      summary: "High application latency (p95)"
+      description: "p95 latency has remained above 500ms for at least 10 minutes."
+
+  - alert: HighCPUUsage
+    expr: |
+      (100 - (avg by (instance) (
+        rate(node_cpu_seconds_total{job="node-exporter",mode="idle"}[5m])
+      ) * 100)) > 80
+    for: 10m
+    labels:
+      severity: warning
+      owner: platform
+    annotations:
+      summary: "High EC2 CPU usage"
+      description: "Host CPU utilization has exceeded 80% for at least 10 minutes."
+
+- name: monitoring_self_health
+    rules:
+    - alert: PrometheusTargetDown
+      expr: up == 0
+      for: 2m
+      labels:
+        severity: critical
+        owner: platform
+      annotations:
+        summary: "Prometheus scrape target is DOWN"
+        description: "Target {{ $labels.job }} / {{ $labels.instance }} has been unreachable for 2 minutes."
+
+    - alert: AlertmanagerDown
+      expr: up{job="alertmanager"} == 0
+      for: 2m
+      labels:
+        severity: critical
+        owner: platform
+      annotations:
+        summary: "Alertmanager is DOWN"
+        description: "Alertmanager has been unreachable for 2 minutes — alert routing is broken."

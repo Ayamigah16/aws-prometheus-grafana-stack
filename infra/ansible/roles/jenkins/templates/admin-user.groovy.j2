@@ -1,0 +1,17 @@
+import jenkins.model.*
+import hudson.security.*
+import jenkins.install.InstallState
+
+def instance = Jenkins.get()
+def adminUser = {{ jenkins_admin_user | to_json }}
+def adminPassword = {{ jenkins_admin_password | to_json }}
+
+def realm = new HudsonPrivateSecurityRealm(false)
+realm.createAccount(adminUser, adminPassword)
+instance.setSecurityRealm(realm)
+
+def strategy = new FullControlOnceLoggedInAuthorizationStrategy()
+strategy.setAllowAnonymousRead(false)
+instance.setAuthorizationStrategy(strategy)
+instance.setInstallState(InstallState.INITIAL_SETUP_COMPLETED)
+instance.save()

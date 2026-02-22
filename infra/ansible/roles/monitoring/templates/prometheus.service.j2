@@ -1,0 +1,30 @@
+[Unit]
+Description=Prometheus monitoring system
+Documentation=https://prometheus.io/docs/introduction/overview/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User={{ prometheus_user }}
+Group={{ prometheus_group }}
+ExecReload=/bin/kill -HUP $MAINPID
+ExecStart={{ prometheus_install_dir }}/prometheus \
+  --config.file={{ prometheus_config_dir }}/prometheus.yml \
+  --storage.tsdb.path={{ prometheus_data_dir }} \
+  --storage.tsdb.retention.time={{ prometheus_retention_time }} \
+  --web.console.libraries=/usr/share/prometheus/console_libraries \
+  --web.console.templates=/usr/share/prometheus/consoles \
+  --web.listen-address=0.0.0.0:9090 \
+  --web.enable-lifecycle
+Restart=on-failure
+RestartSec=5s
+
+# Hardening
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths={{ prometheus_data_dir }}
+
+[Install]
+WantedBy=multi-user.target
