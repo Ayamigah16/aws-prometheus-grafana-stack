@@ -43,3 +43,9 @@ prometheus_scrape_node_exporter_port: 9100
 alert_error_rate_threshold: 5
 alert_latency_p95_threshold: 0.5
 alert_cpu_threshold: 80
+
+# ---------------------------------------------------------------------------
+# AWS / CloudWatch
+# ---------------------------------------------------------------------------
+aws_region: "{{ lookup('env', 'AWS_REGION') }}"
+cloudwatch_log_group: /docker/secure-flask-app

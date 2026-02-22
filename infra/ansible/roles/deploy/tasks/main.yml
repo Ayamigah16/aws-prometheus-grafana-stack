@@ -14,6 +14,23 @@
     groups: docker
     append: true
 
+- name: Configure Docker daemon to use awslogs driver
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {
+        "log-driver": "awslogs",
+        "log-opts": {
+          "awslogs-region": "{{ aws_region }}",
+          "awslogs-group": "{{ cloudwatch_log_group }}",
+          "awslogs-create-group": "true"
+        }
+      }
+  notify: Restart docker
+
 - name: Ensure Docker is running
   ansible.builtin.service:
     name: docker

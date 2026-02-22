@@ -25,3 +25,15 @@ output "monitoring_public_ip" {
 output "monitoring_public_dns" {
   value = module.compute.monitoring_public_dns
 }
+
+output "cloudtrail_bucket" {
+  value = module.security_services.cloudtrail_bucket_name
+}
+
+output "cloudtrail_trail_arn" {
+  value = module.security_services.cloudtrail_trail_arn
+}
+
+output "guardduty_detector_id" {
+  value = module.security_services.guardduty_detector_id
+}

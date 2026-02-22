@@ -100,6 +100,14 @@ module "ecr" {
   tags            = local.common_tags
 }
 
+module "security_services" {
+  source       = "./modules/security_services"
+  project_name = var.project_name
+  aws_region   = var.aws_region
+  environment  = var.environment
+  tags         = local.common_tags
+}
+
 resource "local_file" "ansible_inventory" {
   filename        = "${abspath(path.root)}/../../ansible/inventory/hosts.ini"
   content         = templatefile("${path.module}/templates/inventory.tftpl", {})
@@ -117,6 +125,7 @@ resource "local_file" "ansible_env" {
     monitoring_host_ip     = module.compute.monitoring_public_ip
     monitoring_host_dns    = module.compute.monitoring_public_dns
     monitoring_private_ip  = module.compute.monitoring_private_ip
+    aws_region             = var.aws_region
     ssh_private_key_file   = abspath("${path.root}/../../keys/${var.key_pair_name}.pem")
   })
   file_permission = "0600"

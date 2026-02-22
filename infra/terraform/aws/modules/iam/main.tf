@@ -45,6 +45,26 @@ resource "aws_iam_role_policy_attachment" "deploy_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+data "aws_iam_policy_document" "deploy_cloudwatch" {
+  statement {
+    sid    = "CloudWatchLogsWrite"
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+      "logs:DescribeLogStreams",
+    ]
+    resources = ["arn:aws:logs:*:*:log-group:/docker/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "deploy_cloudwatch" {
+  name   = "${var.project_name}-deploy-cw-logs"
+  role   = aws_iam_role.deploy.id
+  policy = data.aws_iam_policy_document.deploy_cloudwatch.json
+}
+
 resource "aws_iam_instance_profile" "jenkins" {
   name = "${var.project_name}-jenkins-instance-profile"
   role = aws_iam_role.jenkins.name
