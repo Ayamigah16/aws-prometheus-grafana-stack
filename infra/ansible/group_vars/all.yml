@@ -36,7 +36,8 @@ alertmanager_email_oncall: "oncall@example.com"
 
 # Scrape target: private IP of the deploy/app EC2 host (set from .env or inventory)
 prometheus_scrape_app_host: "{{ lookup('env', 'DEPLOY_HOST_IP') }}"
-prometheus_scrape_app_port: 3000
+prometheus_scrape_app_port: 80
+prometheus_scrape_node_exporter_host: "{{ lookup('env', 'DEPLOY_HOST_DNS') }}"
 prometheus_scrape_node_exporter_port: 9100
 
 alert_error_rate_threshold: 5

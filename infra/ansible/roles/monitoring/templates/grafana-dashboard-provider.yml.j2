@@ -1,0 +1,13 @@
+# Grafana dashboard provider — tells Grafana to load JSON files from a directory
+# Docs: https://grafana.com/docs/grafana/latest/administration/provisioning/#dashboards
+apiVersion: 1
+
+providers:
+- name: default
+  type: file
+  disableDeletion: true
+  updateIntervalSeconds: 30
+  allowUiUpdates: false
+  options:
+    path: /etc/grafana/provisioning/dashboards
+    foldersFromFilesStructure: false

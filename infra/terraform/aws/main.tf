@@ -113,6 +113,7 @@ resource "local_file" "ansible_env" {
     jenkins_host_dns       = module.compute.jenkins_public_dns
     deploy_host_ip         = module.compute.deploy_public_ip
     deploy_host_dns        = module.compute.deploy_public_dns
+    deploy_private_ip      = module.compute.deploy_private_ip
     monitoring_host_ip     = module.compute.monitoring_public_ip
     monitoring_host_dns    = module.compute.monitoring_public_dns
     monitoring_private_ip  = module.compute.monitoring_private_ip

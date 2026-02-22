@@ -26,10 +26,10 @@ node_exporter_version: "1.7.0"
 node_exporter_user: node_exporter
 node_exporter_group: node_exporter
 
-# Scrape targets — these are populated from Terraform outputs via env vars
-# Override at inventory/group_vars level with real private IPs.
+# Scrape targets — populated from Terraform outputs via env vars
 prometheus_scrape_app_host: "{{ lookup('env', 'DEPLOY_HOST_IP') }}"
-prometheus_scrape_app_port: 3000
+prometheus_scrape_app_port: 80
+prometheus_scrape_node_exporter_host: "{{ lookup('env', 'DEPLOY_HOST_DNS') }}"
 prometheus_scrape_node_exporter_port: 9100
 
 # Alertmanager notification config (secrets from Vault)

@@ -28,7 +28,7 @@ scrape_configs:
   scheme: http
   static_configs:
   - targets:
-    - APP_EC2_PRIVATE_IP:3000
+    - APP_EC2_PRIVATE_IP:80
     labels:
       service: flask-app
       tier: application

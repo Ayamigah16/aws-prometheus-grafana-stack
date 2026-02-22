@@ -22,6 +22,10 @@ output "monitoring_public_dns" {
   value = aws_instance.monitoring.public_dns
 }
 
+output "deploy_private_ip" {
+  value = aws_instance.deploy.private_ip
+}
+
 output "monitoring_private_ip" {
   value = aws_instance.monitoring.private_ip
 }

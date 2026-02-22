@@ -205,6 +205,44 @@
   no_log: true
   notify: Restart grafana
 
+- name: Create Grafana provisioning directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: grafana
+    mode: "0755"
+  loop:
+    - /etc/grafana/provisioning/datasources
+    - /etc/grafana/provisioning/dashboards
+
+- name: Provision Prometheus datasource
+  ansible.builtin.template:
+    src: grafana-datasource.yml.j2
+    dest: /etc/grafana/provisioning/datasources/prometheus.yml
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: Restart grafana
+
+- name: Provision dashboard provider config
+  ansible.builtin.template:
+    src: grafana-dashboard-provider.yml.j2
+    dest: /etc/grafana/provisioning/dashboards/default.yml
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: Restart grafana
+
+- name: Copy DevSecOps observability dashboard
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../../infra/observability/grafana/dashboards/devsecops-observability-dashboard.json"
+    dest: /etc/grafana/provisioning/dashboards/devsecops-observability-dashboard.json
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: Restart grafana
+
 - name: Enable and start Prometheus
   ansible.builtin.service:
     name: prometheus
