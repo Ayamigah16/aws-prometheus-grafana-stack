@@ -1,9 +1,12 @@
-flask==3.0.0
+flask==3.1.3
 prometheus-client==0.21.1
-opentelemetry-sdk==1.26.0
-opentelemetry-instrumentation-flask==0.47b0
-opentelemetry-instrumentation-requests==0.47b0
-opentelemetry-exporter-otlp-proto-grpc==1.26.0
-# setuptools>=82 removed pkg_resources which opentelemetry-instrumentation 0.47b0 still
-# imports at module load time. Pin to the last version that ships pkg_resources.
-setuptools==75.8.2
+opentelemetry-sdk==1.28.0
+opentelemetry-instrumentation-flask==0.49b0
+opentelemetry-instrumentation-requests==0.49b0
+opentelemetry-exporter-otlp-proto-grpc==1.28.0
+# opentelemetry-proto>=1.28.0 requires protobuf>=5.0,<6.0 ; 5.29.6 is the
+# first 5.x release that fixes CVE GHSA-7gcm-g887-7qv7.
+protobuf==5.29.6
+# setuptools>=82 removed pkg_resources. 78.1.1 is the lowest fixed release
+# (PYSEC-2025-49) that still ships pkg_resources.
+setuptools==78.1.1
