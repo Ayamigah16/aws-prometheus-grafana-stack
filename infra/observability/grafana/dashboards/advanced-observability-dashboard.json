@@ -276,7 +276,7 @@
           "datasource": { "type": "jaeger", "uid": "jaeger-local" },
           "queryType": "search",
           "refId": "A",
-          "service": "secure-flask-app"
+          "serviceName": "secure-flask-app"
         }
       ]
     }
