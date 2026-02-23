@@ -81,12 +81,20 @@ logger = _configure_logging()
 # ---------------------------------------------------------------------------
 # OpenTelemetry initialisation
 # ---------------------------------------------------------------------------
-def _setup_otel(service_name: str, otlp_endpoint: str) -> None:
-    """Register an OTLP-gRPC trace exporter and instrument Flask + Requests.
+_OTEL_ENABLED = False  # set to True when a valid OTLP endpoint is configured
 
-    No-ops when *otlp_endpoint* is empty so the app and tests work without
-    a running Jaeger instance.
+
+def _setup_otel(service_name: str, otlp_endpoint: str) -> None:
+    """Register an OTLP-gRPC trace exporter and instrument Requests.
+
+    No-ops when *otlp_endpoint* is empty or malformed so the app and tests
+    work without a running Jaeger instance.
+
+    NOTE: FlaskInstrumentor is applied per-app inside create_app() via
+    instrument_app(app) — calling instrument() here (before Flask() is
+    instantiated) does NOT hook into the factory-pattern app.
     """
+    global _OTEL_ENABLED
     # Reject empty string or a URL with no host (e.g. "http://:4317" produced
     # when MONITORING_HOST_DNS is unset) — either would activate the SDK but
     # silently drop all spans, making the Jaeger panel show no data.
@@ -99,8 +107,8 @@ def _setup_otel(service_name: str, otlp_endpoint: str) -> None:
     provider = TracerProvider(resource=resource)
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
-    FlaskInstrumentor().instrument()
     RequestsInstrumentor().instrument()
+    _OTEL_ENABLED = True
     logger.info(
         f"OpenTelemetry initialised — exporting to {otlp_endpoint} "
         f"as service '{service_name}'"
@@ -118,6 +126,13 @@ _setup_otel(
 # ---------------------------------------------------------------------------
 def create_app():
     app = Flask(__name__)
+
+    # Attach Flask instrumentation to this specific app instance when OTel is
+    # active.  instrument_app() wraps app.wsgi_app directly and is reliable
+    # with the factory pattern; the module-level instrument() call made before
+    # Flask() is instantiated does NOT hook in correctly.
+    if _OTEL_ENABLED:
+        FlaskInstrumentor().instrument_app(app)
 
     # Externalized configuration via environment variables
     app.config["APP_HOST"] = os.getenv("APP_HOST", "0.0.0.0")
