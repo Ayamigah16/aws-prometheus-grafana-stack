@@ -263,7 +263,7 @@
         "query": {
           "limit": 20,
           "operation": "",
-          "serviceNameQuery": "secure-flask-app",
+          "service": "secure-flask-app",
           "tags": "",
           "maxDuration": "",
           "minDuration": ""
@@ -276,7 +276,7 @@
           "datasource": { "type": "jaeger", "uid": "jaeger-local" },
           "queryType": "search",
           "refId": "A",
-          "serviceName": "secure-flask-app"
+          "service": "secure-flask-app"
         }
       ]
     }
@@ -290,5 +290,5 @@
   "timezone": "browser",
   "title": "Advanced Observability — Distributed Tracing",
   "uid": "advanced-observability-tracing",
-  "version": 1
+  "version": 3
 }
