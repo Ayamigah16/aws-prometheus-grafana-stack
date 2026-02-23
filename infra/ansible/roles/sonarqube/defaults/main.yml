@@ -27,7 +27,7 @@ sonarqube_db_password: "{{ vault_sonarqube_db_password }}"
 
 # SonarQube JVM heap — tune based on available memory
 # t3.medium (4 GB): set to 512m; t3.large (8 GB): set to 1g
-sonarqube_jvm_xmx: "512m"
+sonarqube_jvm_xmx: "256m"
 sonarqube_jvm_xms: "128m"
 
 # Elasticsearch JVM — also embedded in SonarQube
