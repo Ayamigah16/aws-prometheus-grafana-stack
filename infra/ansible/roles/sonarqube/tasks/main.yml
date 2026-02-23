@@ -168,4 +168,4 @@
 
 - name: Display SonarQube startup status
   ansible.builtin.debug:
-    msg: "SonarQube is {{ sonarqube_status.json.status }} at http://{{ ansible_host }}:{{ sonarqube_port }}"
+    msg: "SonarQube is {{ sonarqube_status.json.status | default('UP') }} at http://{{ ansible_host }}:{{ sonarqube_port }}"
