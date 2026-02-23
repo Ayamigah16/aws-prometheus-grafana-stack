@@ -1,0 +1,43 @@
+title = "gitleaks config"
+
+# Extend the default ruleset — catch the same secrets as the official config
+# plus the custom rules below.
+[extend]
+useDefault = true
+
+# ---------------------------------------------------------------------------
+# Global allowlist — patterns / paths that are known-safe in this repo
+# ---------------------------------------------------------------------------
+[allowlist]
+description = "Repo-level allowlist"
+
+# Ansible-vault AES256 ciphertext is not a raw secret.
+regexes = [
+  '''\$ANSIBLE_VAULT;1\.\d;AES256''',
+]
+
+# Encrypted vault file — the entire file is ciphertext, not plaintext secrets.
+paths = [
+  "infra/ansible/group_vars/all/vault.yml",
+  "infra/ansible/group_vars/all/vault.yml.example",
+]
+
+# ---------------------------------------------------------------------------
+# Custom rules
+# ---------------------------------------------------------------------------
+
+# Catch any hardcoded AWS account IDs (12-digit numbers in key ARN patterns).
+[[rules]]
+id          = "aws-account-id-in-arn"
+description = "AWS Account ID embedded in ARN"
+regex       = '''arn:aws:[a-z0-9-]+:[a-z0-9-]*:(\d{12}):'''
+entropy     = 0
+tags        = ["aws"]
+
+[rules.allowlist]
+regexes = [
+  # Terraform aws_iam_policy docs reference canonical ARNs without real IDs.
+  '''arn:aws:iam::aws:policy/''',
+  # Example / template sentinel.
+  '''123456789012''',
+]

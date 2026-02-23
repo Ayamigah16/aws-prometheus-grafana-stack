@@ -63,3 +63,39 @@ variable "ecr_repository_name" {
   type        = string
   default     = "secure-flask-app"
 }
+
+# ---------------------------------------------------------------------------
+# Network — second public subnet (ALB requires >= 2 AZs)
+# ---------------------------------------------------------------------------
+variable "public_subnet_cidr_b" {
+  description = "CIDR for the second public subnet (second AZ)"
+  type        = string
+  default     = "10.20.2.0/24"
+}
+
+# ---------------------------------------------------------------------------
+# ECS Fargate
+# ---------------------------------------------------------------------------
+variable "ecs_bootstrap_image" {
+  description = "Initial container image for the bootstrap ECS task definition (replaced by Jenkins)"
+  type        = string
+  default     = "public.ecr.aws/amazonlinux/amazonlinux:2023"
+}
+
+variable "ecs_task_cpu" {
+  description = "ECS Fargate task CPU units"
+  type        = string
+  default     = "256"
+}
+
+variable "ecs_task_memory" {
+  description = "ECS Fargate task memory in MiB"
+  type        = string
+  default     = "512"
+}
+
+variable "ecs_desired_count" {
+  description = "Initial ECS service desired task count"
+  type        = number
+  default     = 1
+}

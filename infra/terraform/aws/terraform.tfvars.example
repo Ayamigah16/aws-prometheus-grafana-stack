@@ -7,3 +7,24 @@ jenkins_instance_type    = "t3.medium"
 deploy_instance_type     = "t3.small"
 monitoring_instance_type = "t3.small"   # hosts Prometheus + Alertmanager + Grafana
 ecr_repository_name      = "secure-flask-app"
+
+# ---------------------------------------------------------------------------
+# Network — 2nd public subnet for ALB (must be a different AZ from the 1st)
+# ---------------------------------------------------------------------------
+public_subnet_cidr_b = "10.20.2.0/24"
+
+# ---------------------------------------------------------------------------
+# ECS Fargate
+# ---------------------------------------------------------------------------
+ecs_bootstrap_image  = "public.ecr.aws/amazonlinux/amazonlinux:2023"
+ecs_task_cpu         = "256"
+ecs_task_memory      = "512"
+ecs_desired_count    = 1
+
+# After terraform apply, copy the following outputs into Jenkins global env vars:
+#   ALB_DNS_NAME          <- alb_dns_name
+#   ECS_CLUSTER_NAME      <- ecs_cluster_name
+#   ECS_SERVICE_NAME      <- ecs_service_name
+#   ECS_EXECUTION_ROLE_ARN <- ecs_execution_role_arn
+#   ECS_TASK_ROLE_ARN     <- ecs_task_role_arn
+#   ECS_LOG_GROUP         <- ecs_log_group_name

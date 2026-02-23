@@ -44,3 +44,22 @@ resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public.id
   route_table_id = aws_route_table.public.id
 }
+
+# ---------------------------------------------------------------------------
+# Second public subnet — required for ALB (needs >= 2 subnets in 2 AZs)
+# ---------------------------------------------------------------------------
+resource "aws_subnet" "public_b" {
+  vpc_id                  = aws_vpc.this.id
+  cidr_block              = var.public_subnet_cidr_b
+  availability_zone       = var.availability_zone_b
+  map_public_ip_on_launch = false
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-public-subnet-b"
+  })
+}
+
+resource "aws_route_table_association" "public_b" {
+  subnet_id      = aws_subnet.public_b.id
+  route_table_id = aws_route_table.public.id
+}

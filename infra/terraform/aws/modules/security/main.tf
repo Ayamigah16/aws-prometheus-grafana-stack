@@ -181,3 +181,70 @@ resource "aws_security_group_rule" "monitoring_otlp_from_deploy" {
   security_group_id        = aws_security_group.monitoring.id
   source_security_group_id = aws_security_group.deploy.id
 }
+
+# ---------------------------------------------------------------------------
+# ALB Security Group
+# ---------------------------------------------------------------------------
+resource "aws_security_group" "alb" {
+  name        = "${var.project_name}-alb-sg"
+  description = "ALB: allow HTTP from internet"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description = "HTTP from internet"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.tags, { Name = "${var.project_name}-alb-sg" })
+}
+
+# ---------------------------------------------------------------------------
+# ECS Tasks Security Group
+# ---------------------------------------------------------------------------
+resource "aws_security_group" "ecs_tasks" {
+  name        = "${var.project_name}-ecs-tasks-sg"
+  description = "ECS Fargate tasks: receive traffic from ALB only"
+  vpc_id      = var.vpc_id
+
+  egress {
+    description = "All outbound (ECR pull, CW Logs, Jaeger OTLP)"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.tags, { Name = "${var.project_name}-ecs-tasks-sg" })
+}
+
+# Allow ALB to reach ECS tasks on the app port
+resource "aws_security_group_rule" "ecs_from_alb" {
+  type                     = "ingress"
+  description              = "App port from ALB"
+  from_port                = 3000
+  to_port                  = 3000
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ecs_tasks.id
+  source_security_group_id = aws_security_group.alb.id
+}
+
+# Allow monitoring host to scrape ECS task metrics (Prometheus)
+resource "aws_security_group_rule" "ecs_metrics_from_monitoring" {
+  type                     = "ingress"
+  description              = "Prometheus scrape from monitoring host"
+  from_port                = 3000
+  to_port                  = 3000
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ecs_tasks.id
+  source_security_group_id = aws_security_group.monitoring.id
+}

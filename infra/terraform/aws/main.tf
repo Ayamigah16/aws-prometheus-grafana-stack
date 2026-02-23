@@ -46,12 +46,14 @@ locals {
 }
 
 module "network" {
-  source             = "./modules/network"
-  project_name       = var.project_name
-  vpc_cidr           = var.vpc_cidr
-  public_subnet_cidr = var.public_subnet_cidr
-  availability_zone  = data.aws_availability_zones.available.names[0]
-  tags               = local.common_tags
+  source               = "./modules/network"
+  project_name         = var.project_name
+  vpc_cidr             = var.vpc_cidr
+  public_subnet_cidr   = var.public_subnet_cidr
+  public_subnet_cidr_b = var.public_subnet_cidr_b
+  availability_zone    = data.aws_availability_zones.available.names[0]
+  availability_zone_b  = data.aws_availability_zones.available.names[1]
+  tags                 = local.common_tags
 }
 
 module "security" {
@@ -98,6 +100,27 @@ module "ecr" {
   source          = "./modules/ecr"
   repository_name = var.ecr_repository_name
   tags            = local.common_tags
+}
+
+module "ecs" {
+  source       = "./modules/ecs"
+  project_name = var.project_name
+  app_name     = var.ecr_repository_name
+  aws_region   = var.aws_region
+
+  vpc_id            = module.network.vpc_id
+  public_subnet_ids = module.network.public_subnet_ids
+  app_subnet_ids    = module.network.public_subnet_ids
+
+  alb_security_group_id = module.security.alb_security_group_id
+  ecs_security_group_id = module.security.ecs_tasks_security_group_id
+
+  bootstrap_image       = var.ecs_bootstrap_image
+  task_cpu              = var.ecs_task_cpu
+  task_memory           = var.ecs_task_memory
+  service_desired_count = var.ecs_desired_count
+
+  tags = local.common_tags
 }
 
 module "security_services" {

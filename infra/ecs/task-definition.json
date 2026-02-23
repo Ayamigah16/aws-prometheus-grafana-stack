@@ -1,0 +1,58 @@
+{
+  "family": "secure-flask-app",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "${EXECUTION_ROLE_ARN}",
+  "taskRoleArn": "${TASK_ROLE_ARN}",
+  "containerDefinitions": [
+    {
+      "name": "secure-flask-app",
+      "image": "${IMAGE_URI}",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "ENVIRONMENT",                 "value": "production" },
+        { "name": "DEBUG",                       "value": "false" },
+        { "name": "APP_PORT",                    "value": "3000" },
+        { "name": "OTEL_SERVICE_NAME",           "value": "secure-flask-app" },
+        { "name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "${OTLP_ENDPOINT}" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group":         "${LOG_GROUP}",
+          "awslogs-region":        "${AWS_REGION}",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command":     ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"],
+        "interval":    30,
+        "timeout":     5,
+        "retries":     3,
+        "startPeriod": 15
+      },
+      "readonlyRootFilesystem": true,
+      "linuxParameters": {
+        "capabilities":       { "drop": ["ALL"] },
+        "initProcessEnabled": true,
+        "tmpfs": [
+          {
+            "containerPath": "/tmp",
+            "size":          10,
+            "mountOptions":  ["noexec", "nosuid", "nodev"]
+          }
+        ]
+      },
+      "mountPoints":   [],
+      "volumesFrom":   []
+    }
+  ]
+}
