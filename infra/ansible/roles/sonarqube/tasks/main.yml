@@ -146,20 +146,25 @@
 
 # ---------------------------------------------------------------------------
 # Wait for SonarQube to be ready before finishing the play
-# (First boot can take 2–3 minutes while Elasticsearch initialises)
+# First boot on t3.medium can take 5–8 minutes while Elasticsearch
+# initialises. We use failed_when: false so connection errors during JVM
+# startup (ECONNRESET, ECONNREFUSED) don't abort the retry loop early.
 # ---------------------------------------------------------------------------
 - name: Wait for SonarQube web UI to become available
   ansible.builtin.uri:
     url: "http://localhost:{{ sonarqube_port }}/api/system/status"
     method: GET
-    status_code: 200
+    status_code: [200, 503]
     return_content: true
   register: sonarqube_status
+  failed_when: false
   until: >
+    sonarqube_status.status is defined and
     sonarqube_status.status == 200 and
+    sonarqube_status.json is defined and
     (sonarqube_status.json.status == 'UP' or sonarqube_status.json.status == 'DB_MIGRATION_RUNNING')
-  retries: 30
-  delay: 10
+  retries: 48
+  delay: 15
 
 - name: Display SonarQube startup status
   ansible.builtin.debug:
