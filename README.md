@@ -16,18 +16,20 @@ Distributed tracing closes this gap: every inbound HTTP request receives a `trac
 Adding OpenTelemetry also future-proofs the instrumentation: the OTel SDK is vendor-neutral, so switching trace backends (Jaeger → Tempo → X-Ray) requires only a config change, not an app rewrite.
 
 ## Repository Layout
-- `app` Flask application (Prometheus metrics instrumented)
+- `app` Flask application (Prometheus metrics + OTel instrumented)
 - `tests` unit tests
-- `Jenkinsfile` Jenkins declarative pipeline
+- `Jenkinsfile` Jenkins declarative pipeline (14 stages, 4 security gates)
 - `infra/terraform/bootstrap` Terraform state backend bootstrap (S3 + DynamoDB)
-- `infra/terraform/aws` Terraform AWS stack (VPC, EC2 ×3, IAM, ECR, Security Groups, CloudTrail, GuardDuty)
-  - `modules/compute` EC2 instances
-  - `modules/network` VPC, subnets, routing
-  - `modules/security` Security groups
+- `infra/terraform/aws` Terraform AWS stack (VPC, EC2 ×3, IAM, ECR, ECS, ALB, Security Groups, CloudTrail, GuardDuty)
+  - `modules/compute` EC2 instances (Jenkins, Deploy, Monitoring)
+  - `modules/network` VPC, subnets (two AZs), routing
+  - `modules/security` Security groups (EC2 hosts, ALB, ECS tasks)
   - `modules/iam` Instance profiles and roles
-  - `modules/ecr` Container registry
+  - `modules/ecr` Container registry with tightened lifecycle policy
   - `modules/key_pair` SSH key pair
   - `modules/security_services` CloudTrail trail + encrypted S3 bucket, GuardDuty detector
+  - `modules/ecs` ECS Fargate cluster, ALB, service, task definition, CloudWatch alarms, IAM task roles
+- `infra/ecs/task-definition.json` ECS task definition template (rendered by Jenkins at deploy time)
 - `infra/ansible` Ansible playbooks and roles
   - `roles/common` OS baseline
   - `roles/jenkins` Jenkins LTS + plugins + Docker
@@ -36,16 +38,21 @@ Adding OpenTelemetry also future-proofs the instrumentation: the OTel SDK is ven
   - `roles/monitoring` Prometheus + Alertmanager + Grafana + **Jaeger** (systemd)
 - `infra/observability` Prometheus, Alertmanager, and Grafana config references
   - `grafana/dashboards/devsecops-observability-dashboard.json` — original RED metrics + host dashboard
-  - `grafana/dashboards/advanced-observability-dashboard.json` — extended dashboard with Jaeger trace panel
-- `docs` architecture reference and technical report
+  - `grafana/dashboards/advanced-observability-dashboard.json` — extended dashboard with Jaeger trace table panel
+- `.gitleaks.toml` Gitleaks configuration (allowlist for ansible-vault ciphertext)
+- `docs/` architecture reference and technical reports
+  - `docs/devsecops-observability-security-stack.md` — original stack design
+  - `docs/secure-cicd-ecs-pipeline.md` — **ECS Fargate + SAST/SCA/SBOM pipeline** (this extension)
 - `scripts/cleanup_observability_security.sh` full teardown script
 - `runbook.md` ordered setup and operations guide
 - `screenshots` evidence placeholders
 
 ## Deployment Architecture
-- **Jenkins EC2** (Amazon Linux 2) — runs CI/CD stages, pushes image to ECR.
-- **ECR** — stores scanned image tags, scan-on-push enabled.
-- **Deploy EC2** (Amazon Linux 2) — runs the application container on port `80` (mapped from container port `3000`); Docker daemon configured with the `awslogs` log driver, streaming all container stdout/stderr to CloudWatch Logs (`/docker/secure-flask-app`). Node Exporter on port `9100` exposes host metrics.
+- **Jenkins EC2** (Amazon Linux 2) — runs CI/CD stages, pushes image to ECR, registers ECS task definition revisions, and triggers rolling ECS service updates.
+- **ECR** — stores immutable, versioned image tags (`<build>-<commit>`); scan-on-push enabled; lifecycle keeps last 10 tagged images.
+- **ECS Fargate cluster** — serverless container runtime; rolling update deployment; Container Insights enabled for per-task metrics.
+- **Application Load Balancer** — internet-facing, HTTP/80; routes to ECS tasks only after they pass `/health` health checks; provides stable DNS regardless of task replacement.
+- **Deploy EC2** (Amazon Linux 2) — still present for EC2-direct deployments; Docker daemon configured with the `awslogs` log driver. Node Exporter on port `9100` exposes host metrics.
 - **Monitoring EC2** (Amazon Linux 2) — runs Prometheus (`:9090`), Alertmanager (`:9093`), Grafana (`:3000`), and **Jaeger all-in-one** (UI `:16686`, OTLP gRPC `:4317`, OTLP HTTP `:4318`). Prometheus scrapes the Flask app `/metrics` on port `80`, Node Exporter, Alertmanager, and Jaeger's own metrics endpoint. Alertmanager routes `warning` alerts to Slack and `critical` alerts to Slack + email.
 - **OpenTelemetry instrumentation** — the Flask app is auto-instrumented via `opentelemetry-instrumentation-flask`. Every request creates a root span exported over OTLP gRPC to Jaeger. Trace IDs and span IDs are injected into every structured JSON log line by `_TraceContextFilter`, so CloudWatch log events are directly correlated to Jaeger traces.
 - **CloudTrail** — multi-region trail logging all API calls to an encrypted, versioned S3 bucket (`<project>-cloudtrail-<account_id>`); lifecycle transitions logs to Glacier at 90 days and expires at 365 days.
@@ -60,8 +67,8 @@ See [`runbook.md`](runbook.md) for the full step-by-step guide. Summary:
 2. **Provision AWS infrastructure** — fill in `terraform.tfvars` and `backend.hcl`, then `terraform apply` in `infra/terraform/aws` (creates Jenkins EC2, Deploy EC2, Monitoring EC2, VPC, IAM, ECR, CloudTrail trail + S3 bucket, GuardDuty detector, CloudWatch Logs IAM policy — all automated)
 3. **Prepare secrets** — copy `group_vars/all/vault.yml.example` → `vault.yml`, fill in passwords/webhooks, encrypt with `ansible-vault encrypt`
 4. **Configure all hosts** — `cd infra/ansible && ./run-playbook.sh` (configures Jenkins, Deploy host with Docker awslogs driver, Node Exporter, and Monitoring stack with Prometheus + Alertmanager + Grafana + Jaeger)
-5. **Configure Jenkins** — create `git_credentials`, `ec2_ssh`; set `REGISTRY`, `EC2_HOST`, and `MONITORING_HOST_DNS` from Terraform outputs
-6. **Verify observability and security** — Prometheus targets UP at `:9090/targets` (including `jaeger`), Alertmanager ready at `:9093`, Grafana at `:3000` (both dashboards auto-provisioned), Jaeger UI at `:16686`; CloudTrail trail active, GuardDuty detector enabled, CloudWatch log group `/docker/secure-flask-app` receiving structured JSON logs with `trace_id` after first deploy
+5. **Configure Jenkins** — create `git_credentials`, `ec2_ssh`; set `REGISTRY`, `EC2_HOST`, `MONITORING_HOST_DNS`, and the six new ECS env vars from Terraform outputs (`ALB_DNS_NAME`, `ECS_CLUSTER_NAME`, `ECS_SERVICE_NAME`, `ECS_EXECUTION_ROLE_ARN`, `ECS_TASK_ROLE_ARN`, `ECS_LOG_GROUP`) — see [`infra/terraform/aws/terraform.tfvars.example`](infra/terraform/aws/terraform.tfvars.example) for the full mapping
+6. **Verify observability and security** — Prometheus targets UP at `:9090/targets` (including `jaeger`), Alertmanager ready at `:9093`, Grafana at `:3000` (both dashboards auto-provisioned), Jaeger UI at `:16686`; CloudTrail trail active, GuardDuty detector enabled; ECS service running at `http://<ALB_DNS_NAME>/health`
 
 ## Observability Stack
 
@@ -80,14 +87,25 @@ See [`runbook.md`](runbook.md) for the full step-by-step guide. Summary:
 **Correlation workflow**: Alert fires in Grafana → open the *Advanced Observability* dashboard → click a high-latency data point → Jaeger trace panel shows the slow span → copy `trace_id` → filter CloudWatch Logs by `trace_id` to find the exact log lines for that request.
 
 ## Security Controls
-- **Vulnerability scanning**: `pip-audit` (dependencies), `trivy fs` (filesystem), `trivy image` (container image)
-- **Static analysis**: `bandit`
-- **Container hardening**: non-root user, read-only FS, dropped Linux capabilities
+
+See [`docs/secure-cicd-ecs-pipeline.md`](docs/secure-cicd-ecs-pipeline.md) for detailed rationale on each gate.
+
+**Pipeline gates (any failure blocks deployment):**
+- **Secret scanning**: Gitleaks v8.24.0 — runs first, before any build work; blocks on any committed credential
+- **SAST**: Bandit — HIGH+ severity Python static analysis; report archived
+- **SCA**: pip-audit — any CVE in `requirements.txt` against OSV/PyPA databases; report archived
+- **Image scan**: Trivy v0.60.0 — CRITICAL/HIGH CVEs in final container image, runs before ECR push; report archived
+- **SBOM**: Syft v1.19.0 — CycloneDX JSON archived per build for supply chain provenance
+
+**Infrastructure security:**
+- **Container hardening**: non-root user, read-only FS, ALL capabilities dropped, no-exec `/tmp`
+- **ECS IAM**: separate execution role (ECR pull + log group creation) and task role (log writes only — scoped to one log group ARN)
+- **ECS task SG**: inbound only from ALB security group on port 3000 — no direct internet access to tasks
 - **Remote state**: S3 encryption + public access block + DynamoDB locking
-- **IAM**: separate instance roles — Jenkins (ECR push + SSM), deploy host (ECR pull + SSM + CloudWatch Logs write)
-- **CloudTrail**: multi-region API audit trail, log file integrity validation, stored in AES-256-encrypted versioned S3 bucket
-- **GuardDuty**: threat detection enabled with S3 protection and EBS malware scanning
-- **CloudWatch Logs**: all container logs shipped via Docker `awslogs` driver to `/docker/secure-flask-app`
+- **EC2 IAM**: Jenkins (ECR PowerUser + SSM), deploy host (ECR ReadOnly + SSM + CloudWatch Logs write)
+- **CloudTrail**: multi-region API audit trail, log file integrity validation, AES-256-encrypted versioned S3 bucket
+- **GuardDuty**: threat detection with S3 protection and EBS malware scanning
+- **CloudWatch Logs**: ECS `awslogs` driver to `/ecs/<project>/<app>`; EC2 Docker `awslogs` driver to `/docker/secure-flask-app`
 
 ## Rollback Process
 - Deployment uses staging container on `3001` before cutover.
