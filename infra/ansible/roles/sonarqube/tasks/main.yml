@@ -108,18 +108,22 @@
 
 # ---------------------------------------------------------------------------
 # Start / update the stack
+# (Use ansible.builtin.command rather than community.docker.docker_compose_v2
+#  to avoid the collection's Docker CLI discovery failing on Amazon Linux 2)
 # ---------------------------------------------------------------------------
 - name: Pull SonarQube and PostgreSQL images
-  community.docker.docker_compose_v2:
-    project_src: "{{ sonarqube_base_dir }}"
-    state: present
-    pull: always
-  register: sonarqube_compose_result
+  ansible.builtin.command:
+    cmd: docker compose pull
+    chdir: "{{ sonarqube_base_dir }}"
+  register: sonarqube_pull
+  changed_when: "'Pull complete' in sonarqube_pull.stdout or sonarqube_pull.rc == 0"
 
 - name: Start SonarQube stack
-  community.docker.docker_compose_v2:
-    project_src: "{{ sonarqube_base_dir }}"
-    state: present
+  ansible.builtin.command:
+    cmd: docker compose up -d --remove-orphans
+    chdir: "{{ sonarqube_base_dir }}"
+  register: sonarqube_up
+  changed_when: "'Started' in sonarqube_up.stderr or 'Created' in sonarqube_up.stderr"
 
 # ---------------------------------------------------------------------------
 # Wait for SonarQube to be ready before finishing the play

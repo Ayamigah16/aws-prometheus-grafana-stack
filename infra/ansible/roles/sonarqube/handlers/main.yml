@@ -1,6 +1,6 @@
 ---
 - name: restart sonarqube stack
-  community.docker.docker_compose_v2:
-    project_src: "{{ sonarqube_base_dir }}"
-    state: present
-    recreate: always
+  ansible.builtin.command:
+    cmd: docker compose up -d --force-recreate --remove-orphans
+    chdir: "{{ sonarqube_base_dir }}"
+  changed_when: true
