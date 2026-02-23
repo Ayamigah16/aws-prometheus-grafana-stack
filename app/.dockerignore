@@ -1,6 +1,57 @@
+# =============================================================================
+# Docker build context exclusions
+# =============================================================================
+
+# The Dockerfile itself has no place inside the image
+Dockerfile
+
+# Dev-only requirements — production image uses requirements.txt only
+requirements-dev.txt
+
+# Local virtual environment — the image builds its own via pip
+.venv/
+venv/
+env/
+
+# Shell wrapper scripts — CMD is `python app.py`, these are not needed
+run-secure.sh
+
+# Tests and coverage artefacts
+tests/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Python bytecode / cache
 __pycache__/
 *.pyc
-.pytest_cache/
+*.pyo
+*.pyd
+
+# Environment / secrets — never bake into the image
+.env
+.env.*
+*.env
+
+# Git metadata
 .git/
-tests/
+.gitignore
+
+# Documentation
 README.md
+*.md
+
+# Editor / OS artefacts
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Logs and temp files
+*.log
+*.tmp
+*.bak
