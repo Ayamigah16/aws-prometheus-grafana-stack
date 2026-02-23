@@ -3,7 +3,8 @@
 //
 // Security gates (each fails the pipeline when triggered):
 //   • Gitleaks       — any secret/credential committed to git
-//   • pip-audit      — SCA, any known CVE in production requirements
+//   • pip-audit      — SCA fast gate: PyPI/OSV CVEs in requirements (fails early)
+//   • OWASP DC       — SCA deep scan: NVD database, CVSS ≥ 7 gate
 //   • SonarQube QG   — SAST Quality Gate (security hotspots, bugs, coverage)
 //   • Trivy          — container image CRITICAL/HIGH CVEs (fixed or unfixed)
 //
@@ -13,11 +14,22 @@
 //                  SonarQube scanner → Quality Gate (blocks pipeline)
 //   The Quality Gate is the single authoritative CI/CD gate for code quality.
 //
+// SCA strategy (layered):
+//   pip-audit  →  fast, Python-only, OSV/PyPI advisory database, no API key.
+//                 Runs before OWASP DC to fail the pipeline cheaply when
+//                 known CVEs exist in requirements.
+//   OWASP DC   →  comprehensive, NVD database with CVSS scores, multi-ecosystem.
+//                 Detects transitive and indirect vulnerabilities.  Slower but
+//                 more authoritative for compliance reporting.
+//
 // Deliverables archived per build:
 //   reports/gitleaks-report.json
-//   reports/bandit-report.json      ← imported by SonarQube
-//   reports/coverage.xml            ← imported by SonarQube
+//   reports/bandit-report.json                     ← imported by SonarQube
+//   reports/coverage.xml                           ← imported by SonarQube
 //   reports/pip-audit-report.json
+//   reports/dependency-check-report.json
+//   reports/dependency-check-report.html           ← published to Jenkins UI
+//   reports/dependency-check-report.xml
 //   reports/trivy-report.json
 //   reports/sbom.json  (CycloneDX / Syft)
 //
@@ -42,6 +54,7 @@ pipeline {
         TRIVY_IMAGE          = 'aquasec/trivy:0.60.0'
         SYFT_IMAGE           = 'anchore/syft:v1.19.0'
         SONAR_SCANNER_IMAGE  = 'sonarsource/sonar-scanner-cli:5.0.1'
+        OWASP_DC_IMAGE       = 'owasp/dependency-check:10.0.4'
         // Name of the SonarQube server configured in:
         // Jenkins → Manage Jenkins → Configure System → SonarQube servers
         SONARQUBE_ENV_NAME   = 'SonarQube'
@@ -77,6 +90,7 @@ pipeline {
                     env.COVERAGE_MIN      = env.COVERAGE_MIN?.trim()      ?: '80'
                     env.PYTHON_IMAGE      = env.PYTHON_IMAGE?.trim()      ?: 'python:3.12-slim'
                     env.TRIVY_CACHE_DIR   = env.TRIVY_CACHE_DIR?.trim()   ?: '/var/lib/jenkins/.cache/trivy'
+                    env.DC_DATA_DIR       = env.DC_DATA_DIR?.trim()       ?: '/var/lib/jenkins/.cache/owasp-dc'
                     env.AWS_REGION        = env.AWS_REGION?.trim()        ?: 'eu-west-1'
                     env.MONITORING_HOST_DNS = env.MONITORING_HOST_DNS?.trim() ?: ''
 
@@ -218,13 +232,17 @@ pipeline {
         // -------------------------------------------------------------------
         stage('SCA — pip-audit') {
         // -------------------------------------------------------------------
-        // Gate: any CVE found in requirements → FAIL
-        // Reports saved to reports/pip-audit-report.json
+        // Fast SCA gate: cross-references requirements.txt against the OSV
+        // and PyPI advisory databases.  Fails immediately on any known CVE so
+        // the more expensive OWASP DC stage is not wasted on broken deps.
+        //
+        // Gate: any CVE found in production requirements → FAIL
+        // Report: reports/pip-audit-report.json
         // -------------------------------------------------------------------
             steps {
                 sh '''
                     set -euo pipefail
-                    echo "=== pip-audit SCA scan ==="
+                    echo "=== pip-audit SCA (fast gate) ==="
                     docker run --rm \
                       -u "$(id -u):$(id -g)" \
                       -v "$PWD:/workspace" \
@@ -237,8 +255,78 @@ pipeline {
                           --format json \
                           --output ${REPORTS_DIR}/pip-audit-report.json \
                           --progress-spinner off
+                        echo "pip-audit: no CVEs found — gate passed."
                       '
                 '''
+            }
+        }
+
+        // -------------------------------------------------------------------
+        stage('SCA — OWASP Dependency-Check') {
+        // -------------------------------------------------------------------
+        // Deep SCA gate using the full NIST NVD database.
+        //
+        // Why both pip-audit AND OWASP DC?
+        //   pip-audit   → fast (<10 s), Python-only, OSV/PyPI advisories.
+        //                 Best for developer feedback and early pipeline exit.
+        //   OWASP DC    → comprehensive, NVD-backed CVSS scores, covers
+        //                 transitive/indirect deps across all ecosystems.
+        //                 Produces HTML report required for audit evidence.
+        //
+        // Gate: any dependency with CVSS score ≥ 7.0 (HIGH/CRITICAL) → FAIL
+        //
+        // NVD data cache: ${DC_DATA_DIR} is persisted on the Jenkins agent
+        //   between builds to avoid re-downloading the ~250 MB NVD dataset
+        //   on every run (first populate ≈ 5–15 min; subsequent δ-updates
+        //   ≈ 30–90 s).
+        //
+        // NVD API key requirement:
+        //   As of 2023-03-20, OWASP DC requires an NVD API key for fast DB
+        //   updates.  Without it, updates are severely rate-limited (~2 h).
+        //   Obtain a free key at https://nvd.nist.gov/developers/request-an-api-key
+        //   Store it as a Jenkins Secret Text credential with ID: nvd-api-key
+        //
+        // Jenkins plugin: dependency-check-jenkins-plugin (already installed)
+        //   Used by dependencyCheckPublisher() in post{} to render the
+        //   vulnerability trend graph on the Jenkins build page.
+        // -------------------------------------------------------------------
+            steps {
+                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                    sh '''
+                        set -euo pipefail
+                        echo "=== OWASP Dependency-Check SCA (deep gate) ==="
+                        mkdir -p "${DC_DATA_DIR}" "${REPORTS_DIR}"
+
+                        docker run --rm \
+                          -v "${PWD}/app:/src:ro" \
+                          -v "${DC_DATA_DIR}:/usr/share/dependency-check/data" \
+                          -v "${PWD}/${REPORTS_DIR}:/report" \
+                          "${OWASP_DC_IMAGE}" \
+                            --scan /src \
+                            --project "${APP_NAME}" \
+                            --format JSON \
+                            --format HTML \
+                            --format XML \
+                            --out /report \
+                            --failOnCVSS 7 \
+                            --nvdApiKey "${NVD_API_KEY}" \
+                            --enableRetired \
+                            --enableExperimental \
+                            --disableAssembly \
+                            --prettyPrint
+                        echo "OWASP DC: no HIGH/CRITICAL CVEs — gate passed."
+                    '''
+                }
+            }
+            post {
+                always {
+                    // Publish DC HTML report as a Jenkins build artefact page
+                    // (trend graph requires at least two builds to populate)
+                    dependencyCheckPublisher(
+                        pattern: "${REPORTS_DIR}/dependency-check-report.xml",
+                        stopBuild: false    // gate already enforced by --failOnCVSS above
+                    )
+                }
             }
         }
 
