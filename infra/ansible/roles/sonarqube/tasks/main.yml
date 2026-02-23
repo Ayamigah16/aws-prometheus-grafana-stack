@@ -43,6 +43,25 @@
     sysctl_file: /etc/sysctl.d/99-sonarqube.conf
 
 # ---------------------------------------------------------------------------
+# Docker Engine — required to run SonarQube + PostgreSQL via Compose
+# (Amazon Linux 2: install via amazon-linux-extras, then enable + start)
+# ---------------------------------------------------------------------------
+- name: Enable Docker via amazon-linux-extras
+  ansible.builtin.command: amazon-linux-extras enable docker
+  changed_when: false
+
+- name: Install Docker Engine
+  ansible.builtin.yum:
+    name: docker
+    state: present
+
+- name: Enable and start Docker daemon
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+# ---------------------------------------------------------------------------
 # Ensure Docker Compose v2 plugin is available
 # (Amazon Linux 2 ships Docker but not compose-plugin by default)
 # ---------------------------------------------------------------------------
