@@ -20,93 +20,93 @@
 
 repos:
 
-  # ---------------------------------------------------------------------------
-  # Standard hygiene hooks
-  # Fast, language-agnostic, catch obvious mistakes before more expensive scans
-  # ---------------------------------------------------------------------------
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
-    hooks:
-      - id: trailing-whitespace       # trailing spaces break `diff` readability
-      - id: end-of-file-fixer         # every file ends with exactly one newline
-      - id: check-yaml                # syntax-check all YAML files
-      - id: check-json                # syntax-check all JSON files
-      - id: check-toml                # syntax-check TOML (pyproject.toml, etc.)
-      - id: check-merge-conflict      # block accidentally committed merge markers
-      - id: check-case-conflict       # catch case-insensitive filename clashes
-      - id: check-symlinks            # detect broken symlinks
-      - id: mixed-line-ending         # enforce consistent line endings
-        args: [--fix=lf]
-      - id: check-added-large-files   # block accidental large file commits
-        args: [--maxkb=500]
-      - id: detect-private-key        # block PEM/RSA private keys being committed
-      - id: forbid-new-submodules     # no surprise git submodules
+# ---------------------------------------------------------------------------
+# Standard hygiene hooks
+# Fast, language-agnostic, catch obvious mistakes before more expensive scans
+# ---------------------------------------------------------------------------
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v4.6.0
+  hooks:
+  - id: trailing-whitespace # trailing spaces break `diff` readability
+  - id: end-of-file-fixer # every file ends with exactly one newline
+  - id: check-yaml # syntax-check all YAML files
+  - id: check-json # syntax-check all JSON files
+  - id: check-toml # syntax-check TOML (pyproject.toml, etc.)
+  - id: check-merge-conflict # block accidentally committed merge markers
+  - id: check-case-conflict # catch case-insensitive filename clashes
+  - id: check-symlinks # detect broken symlinks
+  - id: mixed-line-ending # enforce consistent line endings
+    args: [ --fix=lf ]
+  - id: check-added-large-files # block accidental large file commits
+    args: [ --maxkb=500 ]
+  - id: detect-private-key # block PEM/RSA private keys being committed
+  - id: forbid-new-submodules # no surprise git submodules
 
-  # ---------------------------------------------------------------------------
-  # Bandit — Python SAST
-  #
-  # Why first gate?  Bandit is fast (<1 s on this codebase) and catches the
-  # classic Python security anti-patterns (shell injection, hardcoded passwords,
-  # use of assert for auth, weak crypto) before a developer can commit them.
-  #
-  # Gate threshold: HIGH severity — matches the CI Quality Gate profile.
-  # Findings at MEDIUM/LOW are surfaced in SonarQube for developer awareness
-  # but do not block the commit.
-  # ---------------------------------------------------------------------------
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.7
-    hooks:
-      - id: bandit
-        name: bandit (SAST — HIGH severity gate)
-        args:
-          - "-r"
-          - "app"
-          - "--severity-level"
-          - "high"
-          - "--confidence-level"
-          - "medium"       # ignore speculative LOW confidence findings
-          - "-q"
-        pass_filenames: false   # scan the whole app/ dir, not just changed files
-        types: [python]
+# ---------------------------------------------------------------------------
+# Bandit — Python SAST
+#
+# Why first gate?  Bandit is fast (<1 s on this codebase) and catches the
+# classic Python security anti-patterns (shell injection, hardcoded passwords,
+# use of assert for auth, weak crypto) before a developer can commit them.
+#
+# Gate threshold: HIGH severity — matches the CI Quality Gate profile.
+# Findings at MEDIUM/LOW are surfaced in SonarQube for developer awareness
+# but do not block the commit.
+# ---------------------------------------------------------------------------
+- repo: https://github.com/PyCQA/bandit
+  rev: 1.7.7
+  hooks:
+  - id: bandit
+    name: bandit (SAST — HIGH severity gate)
+    args:
+    - "-r"
+    - "app"
+    - "--severity-level"
+    - "high"
+    - "--confidence-level"
+    - "medium" # ignore speculative LOW confidence findings
+    - "-q"
+    pass_filenames: false # scan the whole app/ dir, not just changed files
+    types: [ python ]
 
-  # ---------------------------------------------------------------------------
-  # Gitleaks — secret / credential detection
-  #
-  # Why at pre-commit?  Secrets committed to git can never be truly removed
-  # (rebase/squash still leaves them in reflog).  Catching at commit time
-  # prevents the secret ever entering version history.
-  #
-  # Uses the same .gitleaks.toml allowlist as the CI Secret Scan stage so
-  # developers get identical results locally and in the pipeline.
-  # ---------------------------------------------------------------------------
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.24.0
-    hooks:
-      - id: gitleaks
-        name: gitleaks (secret scan)
+# ---------------------------------------------------------------------------
+# Gitleaks — secret / credential detection
+#
+# Why at pre-commit?  Secrets committed to git can never be truly removed
+# (rebase/squash still leaves them in reflog).  Catching at commit time
+# prevents the secret ever entering version history.
+#
+# Uses the same .gitleaks.toml allowlist as the CI Secret Scan stage so
+# developers get identical results locally and in the pipeline.
+# ---------------------------------------------------------------------------
+- repo: https://github.com/gitleaks/gitleaks
+  rev: v8.24.0
+  hooks:
+  - id: gitleaks
+    name: gitleaks (secret scan)
 
-  # ---------------------------------------------------------------------------
-  # Terraform — format and validate
-  # Catches broken HCL before Terraform plan/apply runs in CI.
-  # ---------------------------------------------------------------------------
-  - repo: https://github.com/antonbabenko/pre-commit-terraform
-    rev: v1.92.0
-    hooks:
-      - id: terraform_fmt
-        args: [--args=-recursive]
-      - id: terraform_validate
-        args: [--args=-no-color]
-        # Only validate modules that have been initialised; skip others
-        exclude: "^infra/terraform/bootstrap/"
+# ---------------------------------------------------------------------------
+# Terraform — format and validate
+# Catches broken HCL before Terraform plan/apply runs in CI.
+# ---------------------------------------------------------------------------
+- repo: https://github.com/antonbabenko/pre-commit-terraform
+  rev: v1.92.0
+  hooks:
+  - id: terraform_fmt
+    args: [ --args=-recursive ]
+  - id: terraform_validate
+    args: [ --args=-no-color ]
+    # Only validate modules that have been initialised; skip others
+    exclude: "^infra/terraform/bootstrap/"
 
-  # ---------------------------------------------------------------------------
-  # Ansible Lint — playbook and role quality
-  # Catches deprecated modules, missing `become`, YAML formatting issues.
-  # ---------------------------------------------------------------------------
-  - repo: https://github.com/ansible/ansible-lint
-    rev: v24.2.0
-    hooks:
-      - id: ansible-lint
-        name: ansible-lint
-        files: "^infra/ansible/"
-        args: [--profile=production]
+# ---------------------------------------------------------------------------
+# Ansible Lint — playbook and role quality
+# Catches deprecated modules, missing `become`, YAML formatting issues.
+# ---------------------------------------------------------------------------
+- repo: https://github.com/ansible/ansible-lint
+  rev: v24.2.0
+  hooks:
+  - id: ansible-lint
+    name: ansible-lint
+    files: "^infra/ansible/"
+    args: [ --profile=production ]

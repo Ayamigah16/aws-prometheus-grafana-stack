@@ -40,7 +40,7 @@ LABEL org.opencontainers.image.title="secure-flask-app" \
       org.opencontainers.image.version="${BUILD_NUMBER}" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
       org.opencontainers.image.created="${BUILD_TIMESTAMP}" \
-      org.opencontainers.image.source="https://github.com/your-org/your-repo"
+      org.opencontainers.image.source="https://github.com/Ayamigah16/aws-prometheus-grafana-stack"
 
 # Activate virtual environment
 ENV PATH="/opt/venv/bin:$PATH"

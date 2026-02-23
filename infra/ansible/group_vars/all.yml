@@ -8,7 +8,7 @@ jenkins_plugins:
 - matrix-project
 - ws-cleanup
 - dependency-check-jenkins-plugin
-- sonar                          # SonarQube Scanner plugin (withSonarQubeEnv + waitForQualityGate)
+- sonar # SonarQube Scanner plugin (withSonarQubeEnv + waitForQualityGate)
 
 jenkins_admin_user: admin
 jenkins_http_port: 8080

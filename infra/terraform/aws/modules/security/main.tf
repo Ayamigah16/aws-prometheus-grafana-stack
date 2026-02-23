@@ -118,14 +118,6 @@ resource "aws_security_group" "monitoring" {
   }
 
   ingress {
-    description = "Jaeger UI from admin network"
-    from_port   = 16686
-    to_port     = 16686
-    protocol    = "tcp"
-    cidr_blocks = var.admin_cidrs
-  }
-
-  ingress {
     description = "SonarQube UI from admin network"
     from_port   = 9000
     to_port     = 9000

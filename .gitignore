@@ -142,6 +142,17 @@ Thumbs.db
 reports/.scannerwork/
 
 # =============================================================================
+# CI/CD pipeline runtime artefacts
+# =============================================================================
+
+# Rendered ECS task definition and registered ARN — generated per Jenkins build
+rendered-task-def.json
+task-def-arn.txt
+
+# Security scan reports — archived by Jenkins, not committed to git
+reports/
+
+# =============================================================================
 # Accidental / stray files
 # =============================================================================
 
