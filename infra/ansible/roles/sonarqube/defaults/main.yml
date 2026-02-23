@@ -1,0 +1,35 @@
+---
+# =============================================================================
+# Role defaults — sonarqube
+#
+# Override any of these in group_vars/all.yml, host_vars, or vault.yml.
+# =============================================================================
+
+# SonarQube LTS version (Community Edition)
+sonarqube_version: "9.9-community"
+
+# PostgreSQL version
+sonarqube_postgres_version: "15-alpine"
+
+# Docker Compose plugin version to install if missing
+sonarqube_compose_version: "2.27.1"
+
+# Base directory on the host for all SonarQube data
+sonarqube_base_dir: /opt/sonarqube
+
+# Port the SonarQube web UI listens on  (also exposed to Jenkins on this port)
+sonarqube_port: 9000
+
+# Database credentials — secrets come from vault.yml
+sonarqube_db_name: sonarqube
+sonarqube_db_user: sonar
+sonarqube_db_password: "{{ vault_sonarqube_db_password }}"
+
+# SonarQube JVM heap — tune based on available memory
+# t3.medium (4 GB): set to 512m; t3.large (8 GB): set to 1g
+sonarqube_jvm_xmx: "512m"
+sonarqube_jvm_xms: "128m"
+
+# Elasticsearch JVM — also embedded in SonarQube
+sonarqube_es_jvm_xmx: "512m"
+sonarqube_es_jvm_xms: "128m"

@@ -1,15 +1,22 @@
 // ---------------------------------------------------------------------------
-// Secure CI/CD Pipeline — ECS + SAST/SCA
+// Secure CI/CD Pipeline — ECS + SAST/SCA  (Strict DevSecOps)
 //
 // Security gates (each fails the pipeline when triggered):
-//   • Gitleaks     — any secret/credential committed to git
-//   • Bandit       — Python SAST, HIGH+ severity
-//   • pip-audit    — SCA, any known CVE in requirements
-//   • Trivy        — container image CRITICAL/HIGH CVEs (fixed or unfixed)
+//   • Gitleaks       — any secret/credential committed to git
+//   • pip-audit      — SCA, any known CVE in production requirements
+//   • SonarQube QG   — SAST Quality Gate (security hotspots, bugs, coverage)
+//   • Trivy          — container image CRITICAL/HIGH CVEs (fixed or unfixed)
+//
+// SAST strategy:
+//   Pre-commit  →  Bandit (HIGH severity, blocks commit on dev workstation)
+//   CI          →  Bandit (report-only, feeds SonarQube)
+//                  SonarQube scanner → Quality Gate (blocks pipeline)
+//   The Quality Gate is the single authoritative CI/CD gate for code quality.
 //
 // Deliverables archived per build:
 //   reports/gitleaks-report.json
-//   reports/bandit-report.json
+//   reports/bandit-report.json      ← imported by SonarQube
+//   reports/coverage.xml            ← imported by SonarQube
 //   reports/pip-audit-report.json
 //   reports/trivy-report.json
 //   reports/sbom.json  (CycloneDX / Syft)
@@ -31,10 +38,14 @@ pipeline {
     // Pinned tool image versions — update here to upgrade across all stages
     // -----------------------------------------------------------------------
     environment {
-        GITLEAKS_IMAGE = 'zricethezav/gitleaks:v8.24.0'
-        TRIVY_IMAGE    = 'aquasec/trivy:0.60.0'
-        SYFT_IMAGE     = 'anchore/syft:v1.19.0'
-        REPORTS_DIR    = 'reports'
+        GITLEAKS_IMAGE       = 'zricethezav/gitleaks:v8.24.0'
+        TRIVY_IMAGE          = 'aquasec/trivy:0.60.0'
+        SYFT_IMAGE           = 'anchore/syft:v1.19.0'
+        SONAR_SCANNER_IMAGE  = 'sonarsource/sonar-scanner-cli:5.0.1'
+        // Name of the SonarQube server configured in:
+        // Jenkins → Manage Jenkins → Configure System → SonarQube servers
+        SONARQUBE_ENV_NAME   = 'SonarQube'
+        REPORTS_DIR          = 'reports'
     }
 
     stages {
@@ -171,15 +182,20 @@ pipeline {
         }
 
         // -------------------------------------------------------------------
-        stage('SAST — Bandit') {
+        stage('SAST — Bandit (Report)') {
         // -------------------------------------------------------------------
-        // Gate: any finding with severity HIGH or CRITICAL → FAIL
-        // Reports saved to reports/bandit-report.json
+        // Generates bandit-report.json for import into SonarQube.
+        // This stage does NOT enforce a gate — the Quality Gate stage does.
+        //
+        // Developer gate:  Bandit (HIGH severity) runs as a pre-commit hook
+        //                  via .pre-commit-config.yaml, blocking commits on
+        //                  the workstation before code reaches CI.
+        // CI gate:         SonarQube Quality Gate (next stage pair).
         // -------------------------------------------------------------------
             steps {
                 sh '''
                     set -euo pipefail
-                    echo "=== Bandit SAST scan ==="
+                    echo "=== Bandit SAST — generating report for SonarQube ==="
                     docker run --rm \
                       -u "$(id -u):$(id -g)" \
                       -v "$PWD:/workspace" \
@@ -188,12 +204,12 @@ pipeline {
                       bash -lc '
                         . .venv/bin/activate
                         bandit -r app \
-                          --severity-level high \
+                          --severity-level low \
+                          --confidence-level low \
                           --format json \
                           --output ${REPORTS_DIR}/bandit-report.json \
                           --exit-zero
-                        # Re-run without --exit-zero to enforce the gate
-                        bandit -r app --severity-level high -q
+                        echo "Bandit findings: $(python3 -c \'import json,sys; d=json.load(open(sys.argv[1])); print(len(d[\"results\"]))\'  ${REPORTS_DIR}/bandit-report.json) (all severities — SonarQube will gate)"
                       '
                 '''
             }
@@ -223,6 +239,72 @@ pipeline {
                           --progress-spinner off
                       '
                 '''
+            }
+        }
+
+        // -------------------------------------------------------------------
+        stage('SAST — SonarQube') {
+        // -------------------------------------------------------------------
+        // Runs the SonarQube scanner, importing:
+        //   • bandit-report.json  (security findings from Bandit)
+        //   • coverage.xml        (test coverage from pytest-cov)
+        //
+        // The scanner sends results to SonarQube then waits for the server to
+        // compute the Quality Gate verdict (sonar.qualitygate.wait=true in
+        // sonar-project.properties).  A failing Quality Gate exits non-zero
+        // here, blocking the pipeline before the Docker build runs.
+        //
+        // Jenkins pre-requisites:
+        //   1. SonarQube Scanner plugin installed.
+        //   2. Server configured: Manage Jenkins → Configure System →
+        //      SonarQube servers  (name must match SONARQUBE_ENV_NAME).
+        //   3. Credentials: a SonarQube token stored as a Secret Text with
+        //      ID "sonar-auth-token".
+        // -------------------------------------------------------------------
+            steps {
+                withSonarQubeEnv(
+                    credentialsId:    'sonar-auth-token',
+                    installationName: env.SONARQUBE_ENV_NAME
+                ) {
+                    sh '''
+                        set -euo pipefail
+                        echo "=== SonarQube SAST scan ==="
+                        # Run scanner in Docker — inherits SONAR_HOST_URL and
+                        # SONAR_TOKEN injected by withSonarQubeEnv() into env.
+                        docker run --rm \
+                          --network host \
+                          -v "$PWD:/workspace" \
+                          -w /workspace \
+                          -e SONAR_HOST_URL \
+                          -e SONAR_TOKEN \
+                          "${SONAR_SCANNER_IMAGE}" \
+                            sonar-scanner \
+                              -Dsonar.projectVersion="${BUILD_NUMBER}" \
+                              -Dsonar.working.directory="${REPORTS_DIR}/.scannerwork"
+                        echo "SonarQube scan submitted successfully."
+                    '''
+                }
+            }
+        }
+
+        // -------------------------------------------------------------------
+        stage('Quality Gate') {
+        // -------------------------------------------------------------------
+        // Waits for SonarQube to compute the Quality Gate result (via webhook
+        // or polling).  Aborts the pipeline if the gate fails.
+        //
+        // SonarQube webhook setup (one-time, required for fast feedback):
+        //   SonarQube UI → Administration → Webhooks → Create
+        //   URL: http://<jenkins-host>:8080/sonarqube-webhook/
+        //
+        // Alternatively, sonar.qualitygate.wait=true in sonar-project.properties
+        // makes the scanner itself block — the webhook is then optional but
+        // still recommended for accurate Jenkins build status display.
+        // -------------------------------------------------------------------
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
             }
         }
 

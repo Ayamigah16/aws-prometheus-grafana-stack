@@ -126,6 +126,14 @@ resource "aws_security_group" "monitoring" {
   }
 
   ingress {
+    description = "SonarQube UI from admin network"
+    from_port   = 9000
+    to_port     = 9000
+    protocol    = "tcp"
+    cidr_blocks = var.admin_cidrs
+  }
+
+  ingress {
     description     = "OTLP gRPC traces from deploy host"
     from_port       = 4317
     to_port         = 4317
@@ -180,6 +188,18 @@ resource "aws_security_group_rule" "monitoring_otlp_from_deploy" {
   protocol                 = "tcp"
   security_group_id        = aws_security_group.monitoring.id
   source_security_group_id = aws_security_group.deploy.id
+}
+
+# Allow Jenkins pipeline to reach SonarQube API on the monitoring host
+# (sonar-scanner POST to /api/ce/submit and GET /api/qualitygates/project_status)
+resource "aws_security_group_rule" "monitoring_sonarqube_from_jenkins" {
+  type                     = "ingress"
+  description              = "SonarQube API from Jenkins pipeline"
+  from_port                = 9000
+  to_port                  = 9000
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.monitoring.id
+  source_security_group_id = aws_security_group.jenkins.id
 }
 
 # ---------------------------------------------------------------------------

@@ -45,8 +45,9 @@ infra/ansible/group_vars/all/vault.yml.decrypted
 # SSH / TLS private keys
 # =============================================================================
 
-# Private key written by Terraform key_pair module
+# Private/public key pair written by Terraform key_pair module
 infra/keys/*.pem
+infra/keys/*.pub
 
 # Generic private key patterns
 *.key
@@ -130,6 +131,15 @@ Thumbs.db
 *.bak
 .envrc
 .direnv/
+
+# =============================================================================
+# SonarQube scanner artefacts
+# =============================================================================
+
+# Scanner working directory and report task file (created during CI scan)
+.sonar/
+.scannerwork/
+reports/.scannerwork/
 
 # =============================================================================
 # Accidental / stray files

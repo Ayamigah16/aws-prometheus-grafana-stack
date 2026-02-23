@@ -1,0 +1,69 @@
+# =============================================================================
+# SonarQube Community Edition + PostgreSQL 15
+# Managed by Ansible role: sonarqube
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — SonarQube's external database
+  # SonarQube ships an embedded H2 for evaluation only; PostgreSQL is required
+  # for production use (data persistence, query performance, concurrent scans).
+  # ---------------------------------------------------------------------------
+  sonarqube-db:
+    image: postgres:{{ sonarqube_postgres_version }}
+    container_name: sonarqube-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       "{{ sonarqube_db_name }}"
+      POSTGRES_USER:     "{{ sonarqube_db_user }}"
+      POSTGRES_PASSWORD: "{{ sonarqube_db_password }}"
+    volumes:
+      - {{ sonarqube_base_dir }}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ sonarqube_db_user }} -d {{ sonarqube_db_name }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sonarqube-net
+
+  # ---------------------------------------------------------------------------
+  # SonarQube 9.9 LTS Community Edition
+  # ---------------------------------------------------------------------------
+  sonarqube:
+    image: sonarqube:{{ sonarqube_version }}
+    container_name: sonarqube
+    restart: unless-stopped
+    depends_on:
+      sonarqube-db:
+        condition: service_healthy
+    environment:
+      # Database connection
+      SONAR_JDBC_URL:      "jdbc:postgresql://sonarqube-db:5432/{{ sonarqube_db_name }}"
+      SONAR_JDBC_USERNAME: "{{ sonarqube_db_user }}"
+      SONAR_JDBC_PASSWORD: "{{ sonarqube_db_password }}"
+      # JVM heap — sized conservatively for t3.medium co-location
+      SONAR_WEB_JAVAOPTS:    "-Xmx{{ sonarqube_jvm_xmx }} -Xms{{ sonarqube_jvm_xms }} -XX:+HeapDumpOnOutOfMemoryError"
+      SONAR_CE_JAVAOPTS:     "-Xmx{{ sonarqube_jvm_xmx }} -Xms{{ sonarqube_jvm_xms }} -XX:+HeapDumpOnOutOfMemoryError"
+      SONAR_SEARCH_JAVAOPTS: "-Xmx{{ sonarqube_es_jvm_xmx }} -Xms{{ sonarqube_es_jvm_xms }} -XX:+HeapDumpOnOutOfMemoryError"
+    volumes:
+      - {{ sonarqube_base_dir }}/data:{{ '/' }}opt/sonarqube/data
+      - {{ sonarqube_base_dir }}/logs:{{ '/' }}opt/sonarqube/logs
+      - {{ sonarqube_base_dir }}/extensions:{{ '/' }}opt/sonarqube/extensions
+    ports:
+      - "{{ sonarqube_port }}:9000"
+    # Elasticsearch requires these kernel parameters (set via sysctl task)
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    networks:
+      - sonarqube-net
+
+networks:
+  sonarqube-net:
+    driver: bridge

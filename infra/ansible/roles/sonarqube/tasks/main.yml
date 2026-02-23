@@ -1,0 +1,134 @@
+---
+# =============================================================================
+# Ansible role: sonarqube
+#
+# Deploys SonarQube Community 9.9 LTS + PostgreSQL 15 via Docker Compose on
+# the monitoring host.
+#
+# Why co-locate with the monitoring stack?
+#   • Reduces EC2 cost — one fewer instance.
+#   • SonarQube's own metrics (JVM heap, scan queue depth) are already
+#     scraped by the Node Exporter on the same host.
+#
+# Pre-requisites
+#   • Docker daemon running (installed by the `common` role).
+#   • vm.max_map_count ≥ 262144 (set below — required by Elasticsearch which
+#     SonarQube embeds for its search index).
+#   • Port 9000 open in the monitoring security group for Jenkins to reach the
+#     SonarQube API.
+#
+# ⚠️  Instance sizing: t3.medium (4 GB RAM) is the absolute minimum.
+#     t3.large (8 GB) is strongly recommended when running SonarQube alongside
+#     Prometheus + Grafana + Jaeger.  Set monitoring_instance_type in
+#     terraform.tfvars to "t3.large" before applying.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Kernel tuning — Elasticsearch embedded in SonarQube requires this
+# ---------------------------------------------------------------------------
+- name: Set vm.max_map_count for Elasticsearch
+  ansible.posix.sysctl:
+    name: vm.max_map_count
+    value: "262144"
+    state: present
+    reload: true
+    sysctl_file: /etc/sysctl.d/99-sonarqube.conf
+
+- name: Set fs.file-max for SonarQube
+  ansible.posix.sysctl:
+    name: fs.file-max
+    value: "131072"
+    state: present
+    reload: true
+    sysctl_file: /etc/sysctl.d/99-sonarqube.conf
+
+# ---------------------------------------------------------------------------
+# Ensure Docker Compose v2 plugin is available
+# (Amazon Linux 2 ships Docker but not compose-plugin by default)
+# ---------------------------------------------------------------------------
+- name: Check Docker Compose v2 is installed
+  ansible.builtin.command: docker compose version
+  register: compose_check
+  changed_when: false
+  failed_when: false
+
+- name: Install Docker Compose v2 plugin binary
+  ansible.builtin.get_url:
+    url: "https://github.com/docker/compose/releases/download/v{{ sonarqube_compose_version }}/docker-compose-linux-x86_64"
+    dest: /usr/local/lib/docker/cli-plugins/docker-compose
+    mode: "0755"
+    owner: root
+    group: root
+  when: compose_check.rc != 0
+
+# ---------------------------------------------------------------------------
+# Directory layout
+# ---------------------------------------------------------------------------
+- name: Create SonarQube base directory
+  ansible.builtin.file:
+    path: "{{ sonarqube_base_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Create SonarQube data sub-directories
+  ansible.builtin.file:
+    path: "{{ sonarqube_base_dir }}/{{ item }}"
+    state: directory
+    owner: "1000"    # SonarQube container runs as UID 1000
+    group: "1000"
+    mode: "0750"
+  loop:
+    - data
+    - logs
+    - extensions
+    - postgres
+
+# ---------------------------------------------------------------------------
+# Deploy Compose file
+# ---------------------------------------------------------------------------
+- name: Deploy SonarQube docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.sonarqube.yml.j2
+    dest: "{{ sonarqube_base_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+  notify: restart sonarqube stack
+
+# ---------------------------------------------------------------------------
+# Start / update the stack
+# ---------------------------------------------------------------------------
+- name: Pull SonarQube and PostgreSQL images
+  community.docker.docker_compose_v2:
+    project_src: "{{ sonarqube_base_dir }}"
+    state: present
+    pull: always
+  register: sonarqube_compose_result
+
+- name: Start SonarQube stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ sonarqube_base_dir }}"
+    state: present
+
+# ---------------------------------------------------------------------------
+# Wait for SonarQube to be ready before finishing the play
+# (First boot can take 2–3 minutes while Elasticsearch initialises)
+# ---------------------------------------------------------------------------
+- name: Wait for SonarQube web UI to become available
+  ansible.builtin.uri:
+    url: "http://localhost:{{ sonarqube_port }}/api/system/status"
+    method: GET
+    status_code: 200
+    return_content: true
+  register: sonarqube_status
+  until: >
+    sonarqube_status.status == 200 and
+    (sonarqube_status.json.status == 'UP' or sonarqube_status.json.status == 'DB_MIGRATION_RUNNING')
+  retries: 30
+  delay: 10
+
+- name: Display SonarQube startup status
+  ansible.builtin.debug:
+    msg: "SonarQube is {{ sonarqube_status.json.status }} at http://{{ ansible_host }}:{{ sonarqube_port }}"

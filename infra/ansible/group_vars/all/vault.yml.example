@@ -2,6 +2,12 @@
 # ansible-vault encrypt infra/ansible/group_vars/all/vault.yml
 vault_jenkins_admin_password: "REPLACE_ME"
 
+# SonarQube PostgreSQL database password
+vault_sonarqube_db_password: "REPLACE_ME"
+
+# SonarQube admin password (used for initial setup via the web UI)
+vault_sonarqube_admin_password: "REPLACE_ME"
+
 # Grafana admin password
 vault_grafana_admin_password: "REPLACE_ME"
 
