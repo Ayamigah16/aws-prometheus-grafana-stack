@@ -40,6 +40,8 @@ pipeline {
                     env.AWS_REGION = env.AWS_REGION?.trim() ?: 'eu-west-1'
                     env.DEPLOY_CONTAINER = env.DEPLOY_CONTAINER?.trim() ?: 'secure-flask-app'
                     env.EC2_USER = env.EC2_USER?.trim() ?: 'ec2-user'
+                    // Monitoring host DNS used to configure OTLP trace export endpoint in the app container
+                    env.MONITORING_HOST_DNS = env.MONITORING_HOST_DNS?.trim() ?: ''
                     // Credential ID for Jenkins ssh-agent plugin (not SSH username).
                     env.EC2_SSH_CREDENTIALS_ID = env.EC2_SSH_CREDENTIALS_ID?.trim() ?: env.EC2_SSH_CREDENTIAL_ID?.trim() ?: 'ec2-ssh'
 
@@ -200,7 +202,7 @@ pipeline {
                         sh '''
                             set -euo pipefail
                             ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} \
-                              "IMAGE_NAME='${IMAGE_NAME}:${IMAGE_TAG}' REGISTRY='${REGISTRY}' APP_NAME='${APP_NAME}' DEPLOY_CONTAINER='${DEPLOY_CONTAINER}' USE_ECR='${USE_ECR}' AWS_REGION='${AWS_REGION}' bash -s" \
+                              "IMAGE_NAME='${IMAGE_NAME}:${IMAGE_TAG}' REGISTRY='${REGISTRY}' APP_NAME='${APP_NAME}' DEPLOY_CONTAINER='${DEPLOY_CONTAINER}' USE_ECR='${USE_ECR}' AWS_REGION='${AWS_REGION}' MONITORING_HOST_DNS='${MONITORING_HOST_DNS}' bash -s" \
                               < scripts/deploy_remote.sh
                         '''
                     }

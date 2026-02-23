@@ -21,6 +21,17 @@ if docker ps --format '{{.Names}}' | grep -q "^${STAGING_CONTAINER}$"; then
   docker rm -f "${STAGING_CONTAINER}"
 fi
 
+# Only enable OTel when MONITORING_HOST_DNS is provided; an empty value would
+# produce an invalid endpoint (http://:4317) that activates the SDK but silently
+# drops all spans, making Jaeger appear to have no data.
+OTEL_ARGS=()
+if [ -n "${MONITORING_HOST_DNS:-}" ]; then
+  OTEL_ARGS=(
+    -e OTEL_SERVICE_NAME=secure-flask-app
+    -e OTEL_EXPORTER_OTLP_ENDPOINT="http://${MONITORING_HOST_DNS}:4317"
+  )
+fi
+
 docker run -d --name "${STAGING_CONTAINER}" -p 3001:${APP_PORT} \
   --read-only \
   --tmpfs /tmp:size=10M,mode=1777 \
@@ -28,6 +39,7 @@ docker run -d --name "${STAGING_CONTAINER}" -p 3001:${APP_PORT} \
   --cap-drop=ALL \
   -e ENVIRONMENT=production \
   -e DEBUG=false \
+  "${OTEL_ARGS[@]+${OTEL_ARGS[@]}}" \
   "${IMAGE_NAME}"
 
 for i in {1..10}; do
@@ -54,6 +66,7 @@ docker run -d --name "${ACTIVE_CONTAINER}" -p 80:${APP_PORT} \
   --cap-drop=ALL \
   -e ENVIRONMENT=production \
   -e DEBUG=false \
+  "${OTEL_ARGS[@]+${OTEL_ARGS[@]}}" \
   "${IMAGE_NAME}"
 
 docker rm -f "${STAGING_CONTAINER}" || true
@@ -75,6 +88,7 @@ if ! curl -fsS "http://localhost/health" >/dev/null 2>&1; then
       --cap-drop=ALL \
       -e ENVIRONMENT=production \
       -e DEBUG=false \
+      "${OTEL_ARGS[@]+${OTEL_ARGS[@]}}" \
       "${OLD_IMAGE}"
   fi
   exit 1

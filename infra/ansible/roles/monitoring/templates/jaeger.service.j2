@@ -1,0 +1,27 @@
+[Unit]
+Description=Jaeger All-in-One (distributed tracing backend)
+Documentation=https://www.jaegertracing.io/docs/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={{ jaeger_user }}
+Group={{ jaeger_group }}
+ExecStart={{ jaeger_binary_dir }}/jaeger-all-in-one \
+    --collector.otlp.enabled=true \
+    --collector.otlp.grpc.host-port=0.0.0.0:{{ jaeger_otlp_grpc_port }} \
+    --collector.otlp.http.host-port=0.0.0.0:{{ jaeger_otlp_http_port }} \
+    --query.http-server-hostport=0.0.0.0:{{ jaeger_ui_port }} \
+    --admin.http.host-port=0.0.0.0:{{ jaeger_metrics_port }} \
+    --log-level=info
+
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+# Accept SIGTERM for graceful shutdown
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,19 @@
+apiVersion: 1
+
+datasources:
+  - name: Jaeger
+    type: jaeger
+    uid: jaeger-local
+    url: http://localhost:{{ jaeger_ui_port }}
+    access: proxy
+    isDefault: false
+    editable: false
+    jsonData:
+      tracesToMetrics:
+        datasourceUid: prometheus-local
+        tags: [{ key: service.name, value: service }]
+        queries:
+          - name: Request rate
+            query: sum(rate(http_requests_total{job="python-app"}[$$__rate_interval]))
+          - name: Error rate
+            query: sum(rate(http_requests_total{job="python-app",status=~"5.."}[$$__rate_interval]))

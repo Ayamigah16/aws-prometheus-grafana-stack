@@ -17,3 +17,8 @@
   ansible.builtin.service:
     name: grafana-server
     state: restarted
+
+- name: Restart jaeger
+  ansible.builtin.service:
+    name: jaeger
+    state: restarted

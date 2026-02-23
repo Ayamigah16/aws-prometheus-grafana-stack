@@ -60,24 +60,6 @@ resource "aws_security_group" "deploy" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Allow Prometheus to scrape the app /metrics endpoint.
-  ingress {
-    description     = "Prometheus scrape app metrics"
-    from_port       = 3000
-    to_port         = 3000
-    protocol        = "tcp"
-    security_groups = [aws_security_group.monitoring.id]
-  }
-
-  # Allow Prometheus to scrape Node Exporter on the deploy host.
-  ingress {
-    description     = "Prometheus scrape Node Exporter"
-    from_port       = 9100
-    to_port         = 9100
-    protocol        = "tcp"
-    security_groups = [aws_security_group.monitoring.id]
-  }
-
   egress {
     from_port   = 0
     to_port     = 0
@@ -127,6 +109,30 @@ resource "aws_security_group" "monitoring" {
     cidr_blocks = var.admin_cidrs
   }
 
+  ingress {
+    description = "Jaeger UI from admin network"
+    from_port   = 16686
+    to_port     = 16686
+    protocol    = "tcp"
+    cidr_blocks = var.admin_cidrs
+  }
+
+  ingress {
+    description = "Jaeger UI from admin network"
+    from_port   = 16686
+    to_port     = 16686
+    protocol    = "tcp"
+    cidr_blocks = var.admin_cidrs
+  }
+
+  ingress {
+    description     = "OTLP gRPC traces from deploy host"
+    from_port       = 4317
+    to_port         = 4317
+    protocol        = "tcp"
+    security_groups = [aws_security_group.deploy.id]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -137,4 +143,41 @@ resource "aws_security_group" "monitoring" {
   tags = merge(var.tags, {
     Name = "${var.project_name}-monitoring-sg"
   })
+}
+
+# ---------------------------------------------------------------------------
+# Cross-SG rules — must be declared outside the SG blocks to avoid cycles
+# ---------------------------------------------------------------------------
+
+# Allow Prometheus (monitoring host) to scrape app /metrics on deploy host
+resource "aws_security_group_rule" "deploy_app_metrics_from_monitoring" {
+  type                     = "ingress"
+  description              = "Prometheus scrape app metrics"
+  from_port                = 3000
+  to_port                  = 3000
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.deploy.id
+  source_security_group_id = aws_security_group.monitoring.id
+}
+
+# Allow Prometheus (monitoring host) to scrape Node Exporter on deploy host
+resource "aws_security_group_rule" "deploy_node_exporter_from_monitoring" {
+  type                     = "ingress"
+  description              = "Prometheus scrape Node Exporter"
+  from_port                = 9100
+  to_port                  = 9100
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.deploy.id
+  source_security_group_id = aws_security_group.monitoring.id
+}
+
+# Allow the deploy host to push OTLP traces (gRPC + HTTP) to Jaeger on monitoring host
+resource "aws_security_group_rule" "monitoring_otlp_from_deploy" {
+  type                     = "ingress"
+  description              = "OTLP gRPC/HTTP traces from deploy host"
+  from_port                = 4317
+  to_port                  = 4318
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.monitoring.id
+  source_security_group_id = aws_security_group.deploy.id
 }

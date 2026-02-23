@@ -2,7 +2,18 @@
 
 ## Purpose
 Ordered setup and operations guide for the full DevSecOps stack:
-Terraform (IaC) → Ansible (configuration) → Jenkins (CI/CD) → Observability (Prometheus + Alertmanager + Grafana + Node Exporter) → Security (CloudTrail, GuardDuty, CloudWatch Logs).
+Terraform (IaC) → Ansible (configuration) → Jenkins (CI/CD) → Observability (Prometheus + Alertmanager + Grafana + Node Exporter + **Jaeger + OpenTelemetry**) → Security (CloudTrail, GuardDuty, CloudWatch Logs).
+
+### Why we added distributed tracing
+Prometheus metrics show *aggregate* behaviour — they tell you the p95 latency is 800ms, but not *which* requests were slow or *why*. Log lines tell you an error occurred, but without a `trace_id` you cannot link a specific log entry back to the request that caused it.
+
+OpenTelemetry + Jaeger solves this by:
+- Assigning every HTTP request a unique `trace_id` at the entry point
+- Propagating that ID through all downstream calls automatically (Flask auto-instrumentation)
+- Injecting `trace_id` and `span_id` into every structured JSON log line the app emits
+- Storing the full span tree in Jaeger, accessible by clicking a trace link in Grafana
+
+The result: an alert fires → you open Grafana → find the spike on the latency graph → click into the Jaeger trace panel → see exactly which endpoint was slow and for how long → copy the `trace_id` → filter CloudWatch Logs to read the exact log lines for that request. The entire symptom → trace → root cause path takes under two minutes.
 
 ---
 
@@ -160,10 +171,11 @@ then runs `playbooks/site.yml` against all three hosts in order.
 | Monitoring EC2 | `common`, `monitoring` |
 
 The `monitoring` role installs and starts:
-- Prometheus 2.50.1 — scrapes flask-app (`:3000/metrics`), Node Exporter (`:9100`), and Alertmanager (`:9093`)
-- Alertmanager 0.27.0 — routes `warning` alerts to Slack `#alerts-warning`, `critical` alerts to Slack `#alerts-critical` **and** oncall email
-- Grafana (latest from YUM repo) — pre-configured admin credentials; import dashboard from `infra/observability/grafana/dashboards/`
+- Prometheus 2.50.1 — scrapes flask-app (`:80/metrics`), Node Exporter (`:9100`), Alertmanager (`:9093`), and Jaeger metrics (`:14269`)
+- Alertmanager 0.27.0 — routes `warning` alerts to Slack `#alerts-warning`, `critical` alerts to Slack `#alerts-critical` **and** oncall email; alert thresholds: error rate > 5% for 10 min, p95 latency > 300ms for 10 min
+- Grafana (latest from YUM repo) — admin credentials pre-configured; two dashboards auto-provisioned: *DevSecOps Observability* and *Advanced Observability — Distributed Tracing*; Prometheus and Jaeger datasources both provisioned automatically
 - Node Exporter 1.7.0 — installed on the Deploy EC2 host, scraped by Prometheus over the VPC private network
+- **Jaeger 1.57.0 all-in-one** — receives OTLP gRPC traces from the app container on port `4317`; UI available on port `16686`; metrics exposed on port `14269` for Prometheus to scrape
 
 ```bash
 cd infra/ansible
@@ -204,69 +216,39 @@ Open `http://<JENKINS_PUBLIC_DNS>:8080` → **Manage Jenkins → Credentials →
 Edit `Jenkinsfile` or set them as pipeline parameters:
 
 ```groovy
-REGISTRY  = "<account_id>.dkr.ecr.<region>.amazonaws.com"
-EC2_HOST  = "<DEPLOY_PUBLIC_DNS from terraform output>"
-USE_ECR   = true
+REGISTRY             = "<account_id>.dkr.ecr.<region>.amazonaws.com"
+EC2_HOST             = "<DEPLOY_PUBLIC_DNS from terraform output>"
+MONITORING_HOST_DNS  = "<MONITORING_PUBLIC_DNS from terraform output>"  // used to configure OTLP endpoint in the app container
+USE_ECR              = true
 ```
+
+`MONITORING_HOST_DNS` is passed to the deploy script via SSH and set as `OTEL_EXPORTER_OTLP_ENDPOINT=http://<MONITORING_HOST_DNS>:4317` on the running container. Without it, the app starts without tracing (metrics and logs still work).
 
 ---
 
-## Step 6 — Enable AWS Security Services
+## Step 6 — AWS Security Services (automated by Terraform)
 
-### CloudTrail
+CloudTrail, GuardDuty, and CloudWatch Logs IAM policy are all provisioned automatically during `terraform apply` in Step 2. No manual AWS CLI commands are required.
 
-```bash
-# Create the encrypted S3 bucket for trail logs
-aws s3api create-bucket \
-  --bucket <project>-cloudtrail-logs \
-  --region us-east-1
+**What was created:**
+- **CloudTrail** — multi-region trail (`<project>-trail`) writing to an AES-256-encrypted, versioned S3 bucket (`<project>-cloudtrail-<account_id>`). Log file integrity validation is enabled. Lifecycle policy transitions logs to Glacier at 90 days and expires at 365 days.
+- **GuardDuty** — detector enabled with S3 data event protection and EBS malware scanning; findings published every 15 minutes.
+- **CloudWatch Logs IAM** — inline policy on the deploy instance role grants `logs:CreateLogGroup/Stream/PutLogEvents/DescribeLogStreams` on `/docker/*`. The Docker daemon on the deploy host is configured with the `awslogs` driver so all container stdout/stderr ships to log group `/docker/secure-flask-app` automatically on container start.
 
-aws s3api put-bucket-encryption \
-  --bucket <project>-cloudtrail-logs \
-  --server-side-encryption-configuration \
-    '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+**Why CloudWatch Logs + structured JSON matters for tracing:** Every log line the app emits includes `trace_id` and `span_id` fields (injected by `_TraceContextFilter` in `app.py`). Because those logs land in CloudWatch, you can filter by `trace_id` in the CloudWatch Logs Insights console to retrieve all log lines for a specific request identified in Jaeger.
 
-aws s3api put-public-access-block \
-  --bucket <project>-cloudtrail-logs \
-  --public-access-block-configuration \
-    "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
-
-# Apply Glacier lifecycle (90-day transition, 365-day expiry)
-aws s3api put-bucket-lifecycle-configuration \
-  --bucket <project>-cloudtrail-logs \
-  --lifecycle-configuration file://infra/security/cloudtrail-lifecycle-policy.json
-
-# Create multi-region trail with log file validation
-aws cloudtrail create-trail \
-  --name <project>-trail \
-  --s3-bucket-name <project>-cloudtrail-logs \
-  --is-multi-region-trail \
-  --enable-log-file-validation
-
-aws cloudtrail start-logging --name <project>-trail
-```
-
-### GuardDuty
+Verify the services are active:
 
 ```bash
-# Enable in each region where you operate
-aws guardduty create-detector --enable --finding-publishing-frequency FIFTEEN_MINUTES
-```
+# CloudTrail logging
+aws cloudtrail get-trail-status --name <project>-trail \
+  --query '{IsLogging:IsLogging,LatestDeliveryTime:LatestDeliveryTime}'
 
-### CloudWatch Logs (container logs)
+# GuardDuty
+aws guardduty list-detectors
 
-The Deploy EC2's Docker daemon ships container logs via the `awslogs` driver.
-This is configured by Ansible in the `deploy` role.
-Verify logs are appearing:
-
-```bash
+# CloudWatch log group exists (populated after first container start)
 aws logs describe-log-groups --log-group-name-prefix /docker/secure-flask-app
-aws logs get-log-events \
-  --log-group-name /docker/secure-flask-app \
-  --log-stream-name $(aws logs describe-log-streams \
-    --log-group-name /docker/secure-flask-app \
-    --order-by LastEventTime --descending \
-    --query 'logStreams[0].logStreamName' --output text)
 ```
 
 ---
@@ -308,8 +290,21 @@ curl -X POST http://<MONITORING_PUBLIC_DNS>:9093/api/v2/alerts \
 ```bash
 open http://<MONITORING_PUBLIC_DNS>:3000
 # Login: admin / <vault_grafana_admin_password>
-# Add datasource: Prometheus → http://localhost:9090
-# Import dashboard: infra/observability/grafana/dashboards/devsecops-observability-dashboard.json
+# Two dashboards are auto-provisioned in the sidebar:
+#   • DevSecOps Observability — original RED metrics + CPU/memory
+#   • Advanced Observability — Distributed Tracing — adds Jaeger trace panel
+#
+# No manual import needed.
+```
+
+### Jaeger UI
+
+```bash
+open http://<MONITORING_PUBLIC_DNS>:16686
+# ‘Service’ dropdown should show ‘secure-flask-app’ after the first request is processed
+# If the dropdown is empty, send a test request first:
+curl http://<DEPLOY_PUBLIC_DNS>/health
+curl http://<DEPLOY_PUBLIC_DNS>/
 ```
 
 ### Node Exporter
@@ -326,6 +321,47 @@ ssh ec2-user@<MONITORING_PUBLIC_DNS> \
 curl http://<DEPLOY_PUBLIC_DNS>/metrics | grep http_requests_total
 curl http://<DEPLOY_PUBLIC_DNS>/health
 ```
+
+### CloudWatch log correlation
+
+```bash
+# Fetch the most recent log stream and inspect structured JSON log lines
+LATEST_STREAM=$(aws logs describe-log-streams \
+  --log-group-name /docker/secure-flask-app \
+  --order-by LastEventTime --descending \
+  --query 'logStreams[0].logStreamName' --output text)
+
+aws logs get-log-events \
+  --log-group-name /docker/secure-flask-app \
+  --log-stream-name "${LATEST_STREAM}" \
+  --limit 5 \
+  --query 'events[].message' --output text
+
+# Each line is a JSON object. Example:
+# {"timestamp": "2026-02-23 10:01:43,123", "level": "INFO", "message": "GET /health 200 1.2ms",
+#  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736", "span_id": "00f067aa0ba902b7"}
+#
+# Take the trace_id, open Jaeger UI, and paste it into the Trace ID search box.
+```
+
+---
+
+## Symptom → Trace → Root Cause Workflow
+
+This workflow links a Grafana alert to the exact request and log lines that caused it.
+
+1. **Alert fires** — Alertmanager sends a Slack message: *"HighLatencyP95: p95 > 300ms for 10m"*
+2. **Open Grafana** → `http://<MONITORING_PUBLIC_DNS>:3000` → *Advanced Observability — Distributed Tracing* dashboard
+3. **Latency Percentiles panel** — identify the time window where p95 spiked
+4. **Jaeger traces panel** — scroll to the same time window; slow traces appear in orange/red; click one to open the span waterfall in the Jaeger UI
+5. **Span waterfall** — identify the span with the longest duration (e.g. a slow `/api/items` handler); copy the `Trace ID` from the URL
+6. **CloudWatch Logs Insights** (AWS Console) — open log group `/docker/secure-flask-app`, run:
+   ```
+   fields @timestamp, message, trace_id, span_id
+   | filter trace_id = "<paste-trace-id>"
+   | sort @timestamp asc
+   ```
+7. **Root cause** — the filtered log lines show every log statement emitted during that request, in order, with timing. Correlate with the span name from Jaeger to pinpoint the function or query responsible.
 
 ---
 
@@ -395,12 +431,15 @@ terraform destroy
 |---------|-------------|-----|
 | `terraform init` backend error | Bucket/table name wrong or doesn't exist | Re-run bootstrap; verify `backend.hcl` values |
 | `ansible unreachable` | SG rules block SSH, wrong IP in inventory | Check `admin_cidrs` in `terraform.tfvars`; verify `.env` was generated |
-| Prometheus target DOWN | SG blocking port 3000 or 9100 from monitoring SG | Check deploy SG rules in `security/main.tf` |
+| Prometheus target DOWN | SG blocking port 3000 or 9100 from monitoring SG | Check cross-SG `aws_security_group_rule` resources in `security/main.tf` |
+| Jaeger target DOWN in Prometheus | Jaeger service not started | SSH to monitoring host: `sudo systemctl status jaeger`; check `/tmp/jaeger-*.tar.gz` download |
+| Jaeger UI empty (no services) | App container not exporting traces | Verify `OTEL_EXPORTER_OTLP_ENDPOINT` env var is set on the container; check SG rule `monitoring_otlp_from_deploy` (port 4317) |
+| `trace_id` missing from CloudWatch logs | App running without OTel endpoint | Set `MONITORING_HOST_DNS` in Jenkins job env; redeploy via pipeline |
 | Alertmanager not receiving | `prometheus.yml` alertmanager target wrong | Confirm `localhost:9093` or monitoring-private-IP |
 | Slack alerts not firing | Webhook URL wrong or secret not decrypted | Check `vault_alertmanager_slack_webhook_url` in vault; `amtool check-config` on monitoring host |
 | ECR login failed | Instance role lacks ECR permissions | Confirm `iam/main.tf` jenkins role has ECR policy |
 | Trivy not found on Jenkins | Ansible Jenkins role didn't complete | Re-run `./run-playbook.sh --tags trivy` |
-| Container logs missing in CloudWatch | `awslogs` driver not configured | Re-run deploy Ansible role; check Docker daemon options |
+| Container logs missing in CloudWatch | `awslogs` driver not configured | Re-run deploy Ansible role; check Docker daemon.json on deploy host |
 
 ---
 

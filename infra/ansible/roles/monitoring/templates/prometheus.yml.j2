@@ -48,3 +48,12 @@ scrape_configs:
     static_configs:
       - targets:
           - localhost:9093
+
+  # Jaeger distributed tracing — admin/metrics endpoint
+  - job_name: jaeger
+    static_configs:
+      - targets:
+          - localhost:{{ jaeger_metrics_port }}
+        labels:
+          service: jaeger
+          tier: tracing

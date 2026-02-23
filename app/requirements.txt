@@ -1,2 +1,6 @@
 flask==3.0.0
 prometheus-client==0.21.1
+opentelemetry-sdk==1.26.0
+opentelemetry-instrumentation-flask==0.47b0
+opentelemetry-instrumentation-requests==0.47b0
+opentelemetry-exporter-otlp-proto-grpc==1.26.0

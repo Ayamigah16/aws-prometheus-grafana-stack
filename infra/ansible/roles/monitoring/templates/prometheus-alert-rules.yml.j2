@@ -8,13 +8,13 @@ groups:
             /
             sum(rate(http_requests_total{job="python-app"}[5m]))
           ) * 100 > {{ alert_error_rate_threshold }}
-        for: 5m
+        for: 10m
         labels:
           severity: critical
           owner: platform
         annotations:
           summary: "High application error rate (>{{ alert_error_rate_threshold }}%)"
-          description: "5xx error percentage has exceeded {{ alert_error_rate_threshold }}% for at least 5 minutes. Current value: {{ "{{" }} $value | humanize {{ "}}" }}%"
+          description: "5xx error percentage has exceeded {{ alert_error_rate_threshold }}% for at least 10 minutes. Current value: {{ "{{" }} $value | humanize {{ "}}" }}%"
 
       - alert: HighLatencyP95
         expr: |
@@ -27,8 +27,8 @@ groups:
           severity: warning
           owner: platform
         annotations:
-          summary: "High application latency (p95 > {{ alert_latency_p95_threshold }}s)"
-          description: "p95 latency has remained above {{ alert_latency_p95_threshold }}s for 10 minutes. Current value: {{ "{{" }} $value | humanizeDuration {{ "}}" }}"
+          summary: "High application latency (p95 > {{ alert_latency_p95_threshold }}s / 300ms)"
+          description: "p95 latency has remained above {{ alert_latency_p95_threshold }}s (300ms) for 10 minutes. Current value: {{ "{{" }} $value | humanizeDuration {{ "}}" }}"
 
       - alert: HighCPUUsage
         expr: |

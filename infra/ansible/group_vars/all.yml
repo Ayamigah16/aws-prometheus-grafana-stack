@@ -41,8 +41,20 @@ prometheus_scrape_node_exporter_host: "{{ lookup('env', 'DEPLOY_HOST_DNS') }}"
 prometheus_scrape_node_exporter_port: 9100
 
 alert_error_rate_threshold: 5
-alert_latency_p95_threshold: 0.5
+alert_latency_p95_threshold: 0.3
 alert_cpu_threshold: 80
+
+# ---------------------------------------------------------------------------
+# Jaeger distributed tracing
+# ---------------------------------------------------------------------------
+jaeger_version: "1.57.0"
+jaeger_user: jaeger
+jaeger_group: jaeger
+jaeger_binary_dir: /usr/local/bin
+jaeger_otlp_grpc_port: 4317
+jaeger_otlp_http_port: 4318
+jaeger_ui_port: 16686
+jaeger_metrics_port: 14269
 
 # ---------------------------------------------------------------------------
 # AWS / CloudWatch

@@ -174,6 +174,66 @@
     - Restart alertmanager
 
 # ---------------------------------------------------------------------------
+# Jaeger all-in-one (distributed tracing backend)
+# ---------------------------------------------------------------------------
+
+- name: Create Jaeger system group
+  ansible.builtin.group:
+    name: "{{ jaeger_group }}"
+    system: true
+    state: present
+
+- name: Create Jaeger system user
+  ansible.builtin.user:
+    name: "{{ jaeger_user }}"
+    group: "{{ jaeger_group }}"
+    system: true
+    shell: /sbin/nologin
+    create_home: false
+
+- name: Download Jaeger all-in-one archive
+  ansible.builtin.get_url:
+    url: "https://github.com/jaegertracing/jaeger/releases/download/v{{ jaeger_version }}/jaeger-{{ jaeger_version }}-linux-amd64.tar.gz"
+    dest: "/tmp/jaeger-{{ jaeger_version }}.tar.gz"
+    mode: "0644"
+  register: jaeger_download
+
+- name: Extract Jaeger archive
+  ansible.builtin.unarchive:
+    src: "/tmp/jaeger-{{ jaeger_version }}.tar.gz"
+    dest: /tmp
+    remote_src: true
+  when: jaeger_download.changed  # noqa: no-handler
+
+- name: Install Jaeger all-in-one binary
+  ansible.builtin.copy:
+    src: "/tmp/jaeger-{{ jaeger_version }}-linux-amd64/jaeger-all-in-one"
+    dest: "{{ jaeger_binary_dir }}/jaeger-all-in-one"
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: true
+  when: jaeger_download.changed  # noqa: no-handler
+  notify: Restart jaeger
+
+- name: Install Jaeger systemd unit
+  ansible.builtin.template:
+    src: jaeger.service.j2
+    dest: /etc/systemd/system/jaeger.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart jaeger
+
+- name: Enable and start Jaeger
+  ansible.builtin.service:
+    name: jaeger
+    state: started
+    enabled: true
+
+# ---------------------------------------------------------------------------
 # Grafana
 # ---------------------------------------------------------------------------
 
@@ -225,6 +285,15 @@
     mode: "0640"
   notify: Restart grafana
 
+- name: Provision Jaeger datasource
+  ansible.builtin.template:
+    src: grafana-jaeger-datasource.yml.j2
+    dest: /etc/grafana/provisioning/datasources/jaeger.yml
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: Restart grafana
+
 - name: Provision dashboard provider config
   ansible.builtin.template:
     src: grafana-dashboard-provider.yml.j2
@@ -238,6 +307,15 @@
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../../../infra/observability/grafana/dashboards/devsecops-observability-dashboard.json"
     dest: /etc/grafana/provisioning/dashboards/devsecops-observability-dashboard.json
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: Restart grafana
+
+- name: Copy Advanced Observability dashboard
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../../infra/observability/grafana/dashboards/advanced-observability-dashboard.json"
+    dest: /etc/grafana/provisioning/dashboards/advanced-observability-dashboard.json
     owner: root
     group: grafana
     mode: "0640"
