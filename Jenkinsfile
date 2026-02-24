@@ -137,6 +137,7 @@ pipeline {
                     docker run --rm \
                       -u "$(id -u):$(id -g)" \
                       -v "${PWD}:/workspace:ro" \
+                      -v "${PWD}/${REPORTS_DIR}:/workspace/${REPORTS_DIR}" \
                       "${GITLEAKS_IMAGE}" detect \
                         --source /workspace \
                         --config /workspace/.gitleaks.toml \
