@@ -152,19 +152,26 @@ pipeline {
         // -------------------------------------------------------------------
         stage('Install / Build') {
         // -------------------------------------------------------------------
+        // pip download cache is mounted from the host so packages are served
+        // from disk on subsequent builds instead of being re-downloaded.
+        // PIP_CACHE_DIR=/pip-cache points pip at the mounted host volume.
+        // -------------------------------------------------------------------
             steps {
                 sh '''
                     set -euo pipefail
+                    mkdir -p /var/lib/jenkins/.cache/pip
                     docker run --rm \
                       -u "$(id -u):$(id -g)" \
                       -v "$PWD:/workspace" \
+                      -v "/var/lib/jenkins/.cache/pip:/pip-cache" \
+                      -e PIP_CACHE_DIR=/pip-cache \
                       -w /workspace \
                       "${PYTHON_IMAGE}" \
                       bash -lc '
                         python -m venv .venv
                         . .venv/bin/activate
-                        pip install --upgrade pip
-                        pip install -r app/requirements.txt -r app/requirements-dev.txt
+                        pip install --upgrade pip --quiet
+                        pip install -r app/requirements.txt -r app/requirements-dev.txt --quiet
                         pip check
                       '
                 '''
@@ -172,170 +179,140 @@ pipeline {
         }
 
         // -------------------------------------------------------------------
-        stage('Unit Tests') {
+        stage('Tests & Security Scans') {
         // -------------------------------------------------------------------
-        // Gate: coverage below ${COVERAGE_MIN}% → FAIL
+        // Unit Tests, SAST (Bandit), pip-audit, and OWASP DC run in parallel
+        // to minimise wall-clock time.  All branches write to distinct report
+        // files so there is no I/O conflict on the shared workspace volume.
+        //
+        // OWASP DC runs concurrently with the venv-dependent stages — it only
+        // scans the app/ source tree and does not need the venv at all.
         // -------------------------------------------------------------------
-            steps {
-                sh '''
-                    set -euo pipefail
-                    docker run --rm \
-                      -u "$(id -u):$(id -g)" \
-                      -v "$PWD:/workspace" \
-                      -w /workspace \
-                      -e COVERAGE_MIN="${COVERAGE_MIN}" \
-                      -e REPORTS_DIR="${REPORTS_DIR}" \
-                      "${PYTHON_IMAGE}" \
-                      bash -lc '
-                        . .venv/bin/activate
-                        export PYTHONPATH=/workspace
-                        pytest -q \
-                          --cov=app \
-                          --cov-report=xml:${REPORTS_DIR}/coverage.xml \
-                          --cov-fail-under="${COVERAGE_MIN}"
-                      '
-                '''
-            }
-        }
+            parallel {
 
-        // -------------------------------------------------------------------
-        stage('SAST — Bandit (Report)') {
-        // -------------------------------------------------------------------
-        // Generates bandit-report.json for import into SonarQube.
-        // This stage does NOT enforce a gate — the Quality Gate stage does.
-        //
-        // Developer gate:  Bandit (HIGH severity) runs as a pre-commit hook
-        //                  via .pre-commit-config.yaml, blocking commits on
-        //                  the workstation before code reaches CI.
-        // CI gate:         SonarQube Quality Gate (next stage pair).
-        // -------------------------------------------------------------------
-            steps {
-                sh '''
-                    set -euo pipefail
-                    echo "=== Bandit SAST — generating report for SonarQube ==="
-                    docker run --rm \
-                      -u "$(id -u):$(id -g)" \
-                      -v "$PWD:/workspace" \
-                      -w /workspace \
-                      -e REPORTS_DIR="${REPORTS_DIR}" \
-                      "${PYTHON_IMAGE}" \
-                      bash -lc '
-                        . .venv/bin/activate
-                        bandit -r app \
-                          --severity-level low \
-                          --confidence-level low \
-                          --format json \
-                          --output ${REPORTS_DIR}/bandit-report.json \
-                          --exit-zero
-                        FINDING_COUNT=$(grep -c test_id "${REPORTS_DIR}/bandit-report.json") || FINDING_COUNT=0
-                        echo "Bandit findings: ${FINDING_COUNT} (all severities — SonarQube will gate)"
-                      '
-                '''
-            }
-        }
-
-        // -------------------------------------------------------------------
-        stage('SCA — pip-audit') {
-        // -------------------------------------------------------------------
-        // Fast SCA gate: cross-references requirements.txt against the OSV
-        // and PyPI advisory databases.  Fails immediately on any known CVE so
-        // the more expensive OWASP DC stage is not wasted on broken deps.
-        //
-        // Gate: any CVE found in production requirements → FAIL
-        // Report: reports/pip-audit-report.json
-        // -------------------------------------------------------------------
-            steps {
-                sh '''
-                    set -euo pipefail
-                    echo "=== pip-audit SCA (fast gate) ==="
-                    docker run --rm \
-                      -u "$(id -u):$(id -g)" \
-                      -v "$PWD:/workspace" \
-                      -w /workspace \
-                      -e REPORTS_DIR="${REPORTS_DIR}" \
-                      "${PYTHON_IMAGE}" \
-                      bash -lc '
-                        . .venv/bin/activate
-                        pip-audit \
-                          -r app/requirements.txt \
-                          --format json \
-                          --output ${REPORTS_DIR}/pip-audit-report.json \
-                          --progress-spinner off
-                        echo "pip-audit: no CVEs found — gate passed."
-                      '
-                '''
-            }
-        }
-
-        // -------------------------------------------------------------------
-        stage('SCA — OWASP Dependency-Check') {
-        // -------------------------------------------------------------------
-        // Deep SCA gate using the full NIST NVD database.
-        //
-        // Why both pip-audit AND OWASP DC?
-        //   pip-audit   → fast (<10 s), Python-only, OSV/PyPI advisories.
-        //                 Best for developer feedback and early pipeline exit.
-        //   OWASP DC    → comprehensive, NVD-backed CVSS scores, covers
-        //                 transitive/indirect deps across all ecosystems.
-        //                 Produces HTML report required for audit evidence.
-        //
-        // Gate: any dependency with CVSS score ≥ 7.0 (HIGH/CRITICAL) → FAIL
-        //
-        // NVD data cache: ${DC_DATA_DIR} is persisted on the Jenkins agent
-        //   between builds to avoid re-downloading the ~250 MB NVD dataset
-        //   on every run (first populate ≈ 5–15 min; subsequent δ-updates
-        //   ≈ 30–90 s).
-        //
-        // NVD API key requirement:
-        //   As of 2023-03-20, OWASP DC requires an NVD API key for fast DB
-        //   updates.  Without it, updates are severely rate-limited (~2 h).
-        //   Obtain a free key at https://nvd.nist.gov/developers/request-an-api-key
-        //   Store it as a Jenkins Secret Text credential with ID: nvd-api-key
-        //
-        // Jenkins plugin: dependency-check-jenkins-plugin (already installed)
-        //   Used by dependencyCheckPublisher() in post{} to render the
-        //   vulnerability trend graph on the Jenkins build page.
-        // -------------------------------------------------------------------
-            steps {
-                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
-                    sh '''
-                        set -euo pipefail
-                        echo "=== OWASP Dependency-Check SCA (deep gate) ==="
-                        mkdir -p "${DC_DATA_DIR}" "${REPORTS_DIR}"
-                        # Remove any stale H2 db/lock files from interrupted prior runs
-                        find "${DC_DATA_DIR}" -name "*.lock" -delete 2>/dev/null || true
-                        find "${DC_DATA_DIR}" -name "*.db"   -delete 2>/dev/null || true
-
-                        docker run --rm \
-                          -v "${PWD}/app:/src:ro" \
-                          -v "${DC_DATA_DIR}:/usr/share/dependency-check/data" \
-                          -v "${PWD}/${REPORTS_DIR}:/report" \
-                          "${OWASP_DC_IMAGE}" \
-                            --scan /src \
-                            --project "${APP_NAME}" \
-                            --format JSON \
-                            --format HTML \
-                            --format XML \
-                            --out /report \
-                            --failOnCVSS 7 \
-                            --nvdApiKey "${NVD_API_KEY}" \
-                            --enableRetired \
-                            --enableExperimental \
-                            --disableAssembly \
-                            --prettyPrint
-                        echo "OWASP DC: no HIGH/CRITICAL CVEs — gate passed."
-                    '''
+                stage('Unit Tests') {
+                    steps {
+                        sh '''
+                            set -euo pipefail
+                            docker run --rm \
+                              -u "$(id -u):$(id -g)" \
+                              -v "$PWD:/workspace" \
+                              -w /workspace \
+                              -e COVERAGE_MIN="${COVERAGE_MIN}" \
+                              -e REPORTS_DIR="${REPORTS_DIR}" \
+                              "${PYTHON_IMAGE}" \
+                              bash -lc '
+                                . .venv/bin/activate
+                                export PYTHONPATH=/workspace
+                                pytest -q \
+                                  --cov=app \
+                                  --cov-report=xml:${REPORTS_DIR}/coverage.xml \
+                                  --cov-fail-under="${COVERAGE_MIN}"
+                              '
+                        '''
+                    }
                 }
-            }
-            post {
-                always {
-                    // Publish DC HTML report as a Jenkins build artefact page
-                    // (trend graph requires at least two builds to populate)
-                    dependencyCheckPublisher(
-                        pattern: "${REPORTS_DIR}/dependency-check-report.xml",
-                        stopBuild: false    // gate already enforced by --failOnCVSS above
-                    )
+
+                stage('SAST — Bandit') {
+                // Generates bandit-report.json for SonarCloud import.
+                // Gate is enforced by the Quality Gate stage, not here.
+                    steps {
+                        sh '''
+                            set -euo pipefail
+                            echo "=== Bandit SAST — generating report for SonarQube ==="
+                            docker run --rm \
+                              -u "$(id -u):$(id -g)" \
+                              -v "$PWD:/workspace" \
+                              -w /workspace \
+                              -e REPORTS_DIR="${REPORTS_DIR}" \
+                              "${PYTHON_IMAGE}" \
+                              bash -lc '
+                                . .venv/bin/activate
+                                bandit -r app \
+                                  --severity-level low \
+                                  --confidence-level low \
+                                  --format json \
+                                  --output ${REPORTS_DIR}/bandit-report.json \
+                                  --exit-zero
+                                FINDING_COUNT=$(grep -c test_id "${REPORTS_DIR}/bandit-report.json") || FINDING_COUNT=0
+                                echo "Bandit findings: ${FINDING_COUNT} (all severities — SonarQube will gate)"
+                              '
+                        '''
+                    }
                 }
+
+                stage('SCA — pip-audit') {
+                // Fast gate: fails pipeline immediately on any known CVE in
+                // production requirements, before OWASP DC finishes.
+                    steps {
+                        sh '''
+                            set -euo pipefail
+                            echo "=== pip-audit SCA (fast gate) ==="
+                            docker run --rm \
+                              -u "$(id -u):$(id -g)" \
+                              -v "$PWD:/workspace" \
+                              -w /workspace \
+                              -e REPORTS_DIR="${REPORTS_DIR}" \
+                              "${PYTHON_IMAGE}" \
+                              bash -lc '
+                                . .venv/bin/activate
+                                pip-audit \
+                                  -r app/requirements.txt \
+                                  --format json \
+                                  --output ${REPORTS_DIR}/pip-audit-report.json \
+                                  --progress-spinner off
+                                echo "pip-audit: no CVEs found — gate passed."
+                              '
+                        '''
+                    }
+                }
+
+                stage('SCA — OWASP Dependency-Check') {
+                // Deep SCA gate: full NVD database, CVSS >= 7.0 → FAIL.
+                // NVD cache in DC_DATA_DIR persists between builds — only
+                // delta-updates needed after the initial ~250 MB download.
+                // Only the H2 lock file (*.lock.db) is removed to recover
+                // from interrupted runs; the data DB itself is preserved.
+                    steps {
+                        withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                            sh '''
+                                set -euo pipefail
+                                echo "=== OWASP Dependency-Check SCA (deep gate) ==="
+                                mkdir -p "${DC_DATA_DIR}" "${REPORTS_DIR}"
+                                # Remove stale H2 lock file only — preserves NVD data cache
+                                find "${DC_DATA_DIR}" -name "*.lock.db" -delete 2>/dev/null || true
+
+                                docker run --rm \
+                                  -v "${PWD}/app:/src:ro" \
+                                  -v "${DC_DATA_DIR}:/usr/share/dependency-check/data" \
+                                  -v "${PWD}/${REPORTS_DIR}:/report" \
+                                  "${OWASP_DC_IMAGE}" \
+                                    --scan /src \
+                                    --project "${APP_NAME}" \
+                                    --format JSON \
+                                    --format HTML \
+                                    --format XML \
+                                    --out /report \
+                                    --failOnCVSS 7 \
+                                    --nvdApiKey "${NVD_API_KEY}" \
+                                    --enableRetired \
+                                    --enableExperimental \
+                                    --disableAssembly \
+                                    --prettyPrint
+                                echo "OWASP DC: no HIGH/CRITICAL CVEs — gate passed."
+                            '''
+                        }
+                    }
+                    post {
+                        always {
+                            dependencyCheckPublisher(
+                                pattern: "${REPORTS_DIR}/dependency-check-report.xml",
+                                stopBuild: false
+                            )
+                        }
+                    }
+                }
+
             }
         }
 
@@ -428,49 +405,51 @@ pipeline {
         }
 
         // -------------------------------------------------------------------
-        stage('SBOM — Syft') {
+        stage('SBOM & Image Scan') {
         // -------------------------------------------------------------------
-        // Generates a CycloneDX JSON SBOM and archives it. No gate.
+        // SBOM generation (Syft) and Trivy image scan both operate on the
+        // built image and write to separate files — run in parallel.
+        // Gate: Trivy exits non-zero on any CRITICAL or HIGH CVE.
         // -------------------------------------------------------------------
-            steps {
-                sh '''
-                    set -euo pipefail
-                    echo "=== Syft SBOM generation ==="
-                    docker run --rm \
-                      -v /var/run/docker.sock:/var/run/docker.sock \
-                      "${SYFT_IMAGE}" \
-                        "${IMAGE_NAME}:${IMAGE_TAG}" \
-                        -o cyclonedx-json \
-                      > "${REPORTS_DIR}/sbom.json"
-                    echo "SBOM generated: $(wc -l < ${REPORTS_DIR}/sbom.json) lines"
-                '''
-            }
-        }
+            parallel {
 
-        // -------------------------------------------------------------------
-        stage('Image Scan — Trivy') {
-        // -------------------------------------------------------------------
-        // Gate: any CRITICAL or HIGH CVE → FAIL
-        // Reports saved to reports/trivy-report.json regardless of outcome
-        // -------------------------------------------------------------------
-            steps {
-                sh '''
-                    set -euo pipefail
-                    echo "=== Trivy image scan ==="
-                    mkdir -p "${TRIVY_CACHE_DIR}" "${REPORTS_DIR}"
-                    # Write JSON report directly to workspace via volume mount
-                    docker run --rm \
-                      -v /var/run/docker.sock:/var/run/docker.sock \
-                      -v "${TRIVY_CACHE_DIR}:/root/.cache/trivy" \
-                      -v "${PWD}/${REPORTS_DIR}:/reports" \
-                      "${TRIVY_IMAGE}" image \
-                        --exit-code 1 \
-                        --severity CRITICAL,HIGH \
-                        --format json \
-                        --output /reports/trivy-report.json \
-                        "${IMAGE_NAME}:${IMAGE_TAG}"
-                    echo "Trivy: no CRITICAL/HIGH CVEs — gate passed."
-                '''
+                stage('SBOM — Syft') {
+                    steps {
+                        sh '''
+                            set -euo pipefail
+                            echo "=== Syft SBOM generation ==="
+                            docker run --rm \
+                              -v /var/run/docker.sock:/var/run/docker.sock \
+                              "${SYFT_IMAGE}" \
+                                "${IMAGE_NAME}:${IMAGE_TAG}" \
+                                -o cyclonedx-json \
+                              > "${REPORTS_DIR}/sbom.json"
+                            echo "SBOM generated: $(wc -l < ${REPORTS_DIR}/sbom.json) lines"
+                        '''
+                    }
+                }
+
+                stage('Image Scan — Trivy') {
+                    steps {
+                        sh '''
+                            set -euo pipefail
+                            echo "=== Trivy image scan ==="
+                            mkdir -p "${TRIVY_CACHE_DIR}" "${REPORTS_DIR}"
+                            docker run --rm \
+                              -v /var/run/docker.sock:/var/run/docker.sock \
+                              -v "${TRIVY_CACHE_DIR}:/root/.cache/trivy" \
+                              -v "${PWD}/${REPORTS_DIR}:/reports" \
+                              "${TRIVY_IMAGE}" image \
+                                --exit-code 1 \
+                                --severity CRITICAL,HIGH \
+                                --format json \
+                                --output /reports/trivy-report.json \
+                                "${IMAGE_NAME}:${IMAGE_TAG}"
+                            echo "Trivy: no CRITICAL/HIGH CVEs — gate passed."
+                        '''
+                    }
+                }
+
             }
         }
 
