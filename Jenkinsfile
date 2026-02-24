@@ -217,6 +217,7 @@ pipeline {
                       -u "$(id -u):$(id -g)" \
                       -v "$PWD:/workspace" \
                       -w /workspace \
+                      -e REPORTS_DIR="${REPORTS_DIR}" \
                       "${PYTHON_IMAGE}" \
                       bash -lc '
                         . .venv/bin/activate
@@ -250,6 +251,7 @@ pipeline {
                       -u "$(id -u):$(id -g)" \
                       -v "$PWD:/workspace" \
                       -w /workspace \
+                      -e REPORTS_DIR="${REPORTS_DIR}" \
                       "${PYTHON_IMAGE}" \
                       bash -lc '
                         . .venv/bin/activate
