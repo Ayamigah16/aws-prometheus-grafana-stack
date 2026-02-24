@@ -46,7 +46,8 @@ services:
       # JVM heap — sized conservatively for t3.medium co-location
       SONAR_WEB_JAVAOPTS:    "-Xmx{{ sonarqube_jvm_xmx }} -Xms{{ sonarqube_jvm_xms }} -XX:+HeapDumpOnOutOfMemoryError"
       SONAR_CE_JAVAOPTS:     "-Xmx{{ sonarqube_jvm_xmx }} -Xms{{ sonarqube_jvm_xms }} -XX:+HeapDumpOnOutOfMemoryError"
-      SONAR_SEARCH_JAVAOPTS: "-Xmx{{ sonarqube_es_jvm_xmx }} -Xms{{ sonarqube_es_jvm_xms }} -XX:+HeapDumpOnOutOfMemoryError"
+      # Elasticsearch bootstrap check enforces Xms == Xmx; always use sonarqube_es_jvm_xmx for both
+      SONAR_SEARCH_JAVAOPTS: "-Xmx{{ sonarqube_es_jvm_xmx }} -Xms{{ sonarqube_es_jvm_xmx }} -XX:+HeapDumpOnOutOfMemoryError"
     volumes:
       - {{ sonarqube_base_dir }}/data:{{ '/' }}opt/sonarqube/data
       - {{ sonarqube_base_dir }}/logs:{{ '/' }}opt/sonarqube/logs

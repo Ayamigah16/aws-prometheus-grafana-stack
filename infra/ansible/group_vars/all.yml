@@ -63,11 +63,12 @@ jaeger_metrics_port: 14269
 sonarqube_version: "9.9-community"
 sonarqube_port: 9000
 sonarqube_db_password: "{{ vault_sonarqube_db_password }}"
-# JVM heap — increase to 1g if monitoring_instance_type is t3.large or above
+# JVM heap for SonarQube Web + CE processes
 sonarqube_jvm_xmx: "512m"
 sonarqube_jvm_xms: "128m"
+# Elasticsearch REQUIRES Xms == Xmx (bootstrap check enforced)
 sonarqube_es_jvm_xmx: "512m"
-sonarqube_es_jvm_xms: "128m"
+sonarqube_es_jvm_xms: "512m"
 
 # ---------------------------------------------------------------------------
 # AWS / CloudWatch
