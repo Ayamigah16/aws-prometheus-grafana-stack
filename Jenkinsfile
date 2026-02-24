@@ -227,7 +227,7 @@ pipeline {
                           --format json \
                           --output ${REPORTS_DIR}/bandit-report.json \
                           --exit-zero
-                        FINDING_COUNT=$(python3 -c "import json; d=json.load(open('${REPORTS_DIR}/bandit-report.json')); print(len(d['results']))")
+                        FINDING_COUNT=$(python3 -c "import json,os; d=json.load(open(os.environ[\"REPORTS_DIR\"]+\"/bandit-report.json\")); print(len(d[\"results\"]))")
                         echo "Bandit findings: ${FINDING_COUNT} (all severities — SonarQube will gate)"
                       '
                 '''
@@ -302,6 +302,8 @@ pipeline {
                         set -euo pipefail
                         echo "=== OWASP Dependency-Check SCA (deep gate) ==="
                         mkdir -p "${DC_DATA_DIR}" "${REPORTS_DIR}"
+                        # Remove stale lock files left by interrupted prior runs
+                        find "${DC_DATA_DIR}" -name "*.lock" -delete 2>/dev/null || true
 
                         docker run --rm \
                           -v "${PWD}/app:/src:ro" \
