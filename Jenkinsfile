@@ -184,6 +184,7 @@ pipeline {
                       -v "$PWD:/workspace" \
                       -w /workspace \
                       -e COVERAGE_MIN="${COVERAGE_MIN}" \
+                      -e REPORTS_DIR="${REPORTS_DIR}" \
                       "${PYTHON_IMAGE}" \
                       bash -lc '
                         . .venv/bin/activate
