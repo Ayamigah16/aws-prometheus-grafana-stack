@@ -269,33 +269,25 @@ pipeline {
 
                 stage('SCA — OWASP Dependency-Check') {
                 // Deep SCA gate: full NVD database, CVSS >= 7.0 → FAIL.
-                // NVD cache in DC_DATA_DIR persists between builds — only
-                // delta-updates needed after the initial ~250 MB download.
-                // Only the H2 lock file (*.lock.db) is removed to recover
-                // from interrupted runs; the data DB itself is preserved.
+                // The data dir is intentionally NOT mounted from the host:
+                // mounting a host-owned dir causes the container's non-root
+                // dependencycheck user (different UID from Jenkins 995) to
+                // hit H2 concurrency faults ("connectionPool is null") when
+                // the multi-threaded NVD importer races against a pool that
+                // gets closed on the first thread error.  Letting the container
+                // own its own ephemeral /usr/share/dependency-check/data gives
+                // H2 a clean, fully-writable directory every single run.
+                // Trade-off: NVD download (~5-15 min) every build.
                     steps {
                         withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
                             sh '''
                                 set -euo pipefail
                                 echo "=== OWASP Dependency-Check SCA (deep gate) ==="
                                 mkdir -p "${REPORTS_DIR}"
-                                # Wipe the H2 database file so OWASP DC always starts from a clean
-                                # schema.  Partial/corrupt .mv.db files left by previous killed or
-                                # permission-denied runs cause "connectionPool is null" NPEs during
-                                # NVD data insertion — even though the container can open the file
-                                # it cannot use a half-initialised schema.  The NVD JSON cache and
-                                # all other files in DC_DATA_DIR are PRESERVED so only the database
-                                # itself is rebuilt; NVD API calls still happen but the raw feed
-                                # files do not need to be re-downloaded.
-                                rm -f "${DC_DATA_DIR}"/*.mv.db "${DC_DATA_DIR}"/*.trace.db 2>/dev/null || true
-                                mkdir -p "${DC_DATA_DIR}"
-                                # Wide-open permissions so the non-root container user (dependencycheck)
-                                # whose UID differs from Jenkins (995) can create and lock the H2 db.
-                                chmod 777 "${DC_DATA_DIR}"
+                                chmod 777 "${REPORTS_DIR}"
 
                                 docker run --rm \
                                   -v "${PWD}/app:/src:ro" \
-                                  -v "${DC_DATA_DIR}:/usr/share/dependency-check/data" \
                                   -v "${PWD}/${REPORTS_DIR}:/report" \
                                   "${OWASP_DC_IMAGE}" \
                                     --scan /src \
@@ -306,6 +298,7 @@ pipeline {
                                     --out /report \
                                     --failOnCVSS 7 \
                                     --nvdApiKey "${NVD_API_KEY}" \
+                                    --nvdMaxRetryCount 3 \
                                     --enableRetired \
                                     --enableExperimental \
                                     --disableAssembly \
