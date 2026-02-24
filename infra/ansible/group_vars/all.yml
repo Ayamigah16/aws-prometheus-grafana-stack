@@ -60,7 +60,7 @@ jaeger_metrics_port: 14269
 # ---------------------------------------------------------------------------
 # SonarQube — SAST / Quality Gate
 # ---------------------------------------------------------------------------
-sonarqube_version: "2025.1-community"
+sonarqube_version: "community"   # rolling tag = latest Community edition (26.x / 2026 series)
 sonarqube_port: 9000
 sonarqube_db_password: "{{ vault_sonarqube_db_password }}"
 # JVM heap for SonarQube Web + CE processes
