@@ -303,7 +303,8 @@ pipeline {
                         echo "=== OWASP Dependency-Check SCA (deep gate) ==="
                         mkdir -p "${DC_DATA_DIR}" "${REPORTS_DIR}"
                         # Remove any stale H2 db/lock files from interrupted prior runs
-                        find "${DC_DATA_DIR}" \( -name "*.lock" -o -name "*.db" \) -delete 2>/dev/null || true
+                        find "${DC_DATA_DIR}" -name "*.lock" -delete 2>/dev/null || true
+                        find "${DC_DATA_DIR}" -name "*.db"   -delete 2>/dev/null || true
 
                         docker run --rm \
                           -v "${PWD}/app:/src:ro" \
