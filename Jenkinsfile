@@ -278,15 +278,20 @@ pipeline {
                             sh '''
                                 set -euo pipefail
                                 echo "=== OWASP Dependency-Check SCA (deep gate) ==="
-                                mkdir -p "${DC_DATA_DIR}" "${REPORTS_DIR}"
-                                # Ensure the OWASP DC container user can read/write the cache dir.
-                                # The container runs as a non-root 'dependencycheck' user whose UID
-                                # differs from Jenkins (995), so without this the container cannot
-                                # create or lock the H2 database → "exclusive lock" error.
+                                mkdir -p "${REPORTS_DIR}"
+                                # Wipe the H2 database file so OWASP DC always starts from a clean
+                                # schema.  Partial/corrupt .mv.db files left by previous killed or
+                                # permission-denied runs cause "connectionPool is null" NPEs during
+                                # NVD data insertion — even though the container can open the file
+                                # it cannot use a half-initialised schema.  The NVD JSON cache and
+                                # all other files in DC_DATA_DIR are PRESERVED so only the database
+                                # itself is rebuilt; NVD API calls still happen but the raw feed
+                                # files do not need to be re-downloaded.
+                                rm -f "${DC_DATA_DIR}"/*.mv.db "${DC_DATA_DIR}"/*.trace.db 2>/dev/null || true
+                                mkdir -p "${DC_DATA_DIR}"
+                                # Wide-open permissions so the non-root container user (dependencycheck)
+                                # whose UID differs from Jenkins (995) can create and lock the H2 db.
                                 chmod 777 "${DC_DATA_DIR}"
-                                # Remove zero-byte or clearly truncated H2 db left by killed runs.
-                                # Healthy databases are preserved to avoid re-downloading ~250 MB.
-                                find "${DC_DATA_DIR}" -name "*.mv.db" -size 0 -delete 2>/dev/null || true
 
                                 docker run --rm \
                                   -v "${PWD}/app:/src:ro" \
