@@ -227,7 +227,8 @@ pipeline {
                           --format json \
                           --output ${REPORTS_DIR}/bandit-report.json \
                           --exit-zero
-                        echo "Bandit findings: $(python3 -c \'import json,sys; d=json.load(open(sys.argv[1])); print(len(d[\"results\"]))\'  ${REPORTS_DIR}/bandit-report.json) (all severities — SonarQube will gate)"
+                        FINDING_COUNT=$(python3 -c "import json; d=json.load(open('${REPORTS_DIR}/bandit-report.json')); print(len(d['results']))")
+                        echo "Bandit findings: ${FINDING_COUNT} (all severities — SonarQube will gate)"
                       '
                 '''
             }
