@@ -35,4 +35,13 @@
   roles:
     - common
     - monitoring
+
+- name: Configure SonarQube host
+  hosts: sonarqube
+  become: true
+  vars_files:
+    - ../group_vars/all.yml
+    - ../group_vars/all/vault.yml
+  roles:
+    - common
     - sonarqube

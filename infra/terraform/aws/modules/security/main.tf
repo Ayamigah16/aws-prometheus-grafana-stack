@@ -118,14 +118,6 @@ resource "aws_security_group" "monitoring" {
   }
 
   ingress {
-    description = "SonarQube UI from admin network"
-    from_port   = 9000
-    to_port     = 9000
-    protocol    = "tcp"
-    cidr_blocks = var.admin_cidrs
-  }
-
-  ingress {
     description     = "OTLP gRPC traces from deploy host"
     from_port       = 4317
     to_port         = 4317
@@ -182,7 +174,7 @@ resource "aws_security_group_rule" "monitoring_otlp_from_deploy" {
   source_security_group_id = aws_security_group.deploy.id
 }
 
-# Allow Jenkins pipeline to reach SonarQube API on the monitoring host
+# Allow Jenkins pipeline to reach SonarQube API on the sonarqube host
 # (sonar-scanner POST to /api/ce/submit and GET /api/qualitygates/project_status)
 resource "aws_security_group_rule" "monitoring_sonarqube_from_jenkins" {
   type                     = "ingress"
@@ -190,8 +182,44 @@ resource "aws_security_group_rule" "monitoring_sonarqube_from_jenkins" {
   from_port                = 9000
   to_port                  = 9000
   protocol                 = "tcp"
-  security_group_id        = aws_security_group.monitoring.id
+  security_group_id        = aws_security_group.sonarqube.id
   source_security_group_id = aws_security_group.jenkins.id
+}
+
+# ---------------------------------------------------------------------------
+# SonarQube Security Group
+# ---------------------------------------------------------------------------
+resource "aws_security_group" "sonarqube" {
+  name        = "${var.project_name}-sonarqube-sg"
+  description = "SonarQube SAST server: port 9000 from admin and Jenkins"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description = "SSH from admin network"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = var.admin_cidrs
+  }
+
+  ingress {
+    description = "SonarQube UI from admin network"
+    from_port   = 9000
+    to_port     = 9000
+    protocol    = "tcp"
+    cidr_blocks = var.admin_cidrs
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-sonarqube-sg"
+  })
 }
 
 # ---------------------------------------------------------------------------
@@ -259,4 +287,40 @@ resource "aws_security_group_rule" "ecs_metrics_from_monitoring" {
   protocol                 = "tcp"
   security_group_id        = aws_security_group.ecs_tasks.id
   source_security_group_id = aws_security_group.monitoring.id
+}
+
+# ---------------------------------------------------------------------------
+# SonarQube Security Group
+# ---------------------------------------------------------------------------
+resource "aws_security_group" "sonarqube" {
+  name        = "${var.project_name}-sonarqube-sg"
+  description = "SonarQube SAST server: port 9000 from admin and Jenkins"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    description = "SSH from admin network"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = var.admin_cidrs
+  }
+
+  ingress {
+    description = "SonarQube UI from admin network"
+    from_port   = 9000
+    to_port     = 9000
+    protocol    = "tcp"
+    cidr_blocks = var.admin_cidrs
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-sonarqube-sg"
+  })
 }

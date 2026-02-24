@@ -78,22 +78,25 @@ module "key_pair" {
 }
 
 module "compute" {
-  source                          = "./modules/compute"
-  project_name                    = var.project_name
-  ami_id                          = data.aws_ami.amazon_linux_2.id
-  subnet_id                       = module.network.public_subnet_id
-  key_name                        = module.key_pair.key_name
-  ssh_key_fingerprint             = module.key_pair.public_key_fingerprint_sha256
-  jenkins_security_group_id       = module.security.jenkins_security_group_id
-  deploy_security_group_id        = module.security.deploy_security_group_id
-  monitoring_security_group_id    = module.security.monitoring_security_group_id
-  jenkins_instance_profile_name   = module.iam.jenkins_instance_profile_name
-  deploy_instance_profile_name    = module.iam.deploy_instance_profile_name
+  source                           = "./modules/compute"
+  project_name                     = var.project_name
+  ami_id                           = data.aws_ami.amazon_linux_2.id
+  subnet_id                        = module.network.public_subnet_id
+  key_name                         = module.key_pair.key_name
+  ssh_key_fingerprint              = module.key_pair.public_key_fingerprint_sha256
+  jenkins_security_group_id        = module.security.jenkins_security_group_id
+  deploy_security_group_id         = module.security.deploy_security_group_id
+  monitoring_security_group_id     = module.security.monitoring_security_group_id
+  sonarqube_security_group_id      = module.security.sonarqube_security_group_id
+  jenkins_instance_profile_name    = module.iam.jenkins_instance_profile_name
+  deploy_instance_profile_name     = module.iam.deploy_instance_profile_name
   monitoring_instance_profile_name = module.iam.monitoring_instance_profile_name
-  jenkins_instance_type           = var.jenkins_instance_type
-  deploy_instance_type            = var.deploy_instance_type
-  monitoring_instance_type        = var.monitoring_instance_type
-  tags                            = local.common_tags
+  sonarqube_instance_profile_name  = module.iam.sonarqube_instance_profile_name
+  jenkins_instance_type            = var.jenkins_instance_type
+  deploy_instance_type             = var.deploy_instance_type
+  monitoring_instance_type         = var.monitoring_instance_type
+  sonarqube_instance_type          = var.sonarqube_instance_type
+  tags                             = local.common_tags
 }
 
 module "ecr" {
@@ -148,6 +151,8 @@ resource "local_file" "ansible_env" {
     monitoring_host_ip     = module.compute.monitoring_public_ip
     monitoring_host_dns    = module.compute.monitoring_public_dns
     monitoring_private_ip  = module.compute.monitoring_private_ip
+    sonarqube_host_ip      = module.compute.sonarqube_public_ip
+    sonarqube_host_dns     = module.compute.sonarqube_public_dns
     aws_region             = var.aws_region
     ssh_private_key_file   = abspath("${path.root}/../../keys/${var.key_pair_name}.pem")
   })

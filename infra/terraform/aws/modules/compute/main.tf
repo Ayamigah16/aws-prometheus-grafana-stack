@@ -79,3 +79,31 @@ resource "aws_instance" "monitoring" {
     Role = "monitoring"
   })
 }
+
+resource "aws_instance" "sonarqube" {
+  ami                         = var.ami_id
+  instance_type               = var.sonarqube_instance_type
+  subnet_id                   = var.subnet_id
+  vpc_security_group_ids      = [var.sonarqube_security_group_id]
+  key_name                    = var.key_name
+  associate_public_ip_address = true
+  iam_instance_profile        = var.sonarqube_instance_profile_name
+  user_data                   = "ssh_key_fingerprint=${var.ssh_key_fingerprint}"
+  user_data_replace_on_change = true
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+  }
+
+  root_block_device {
+    # SonarQube + PostgreSQL data + Elasticsearch index
+    volume_size = 30
+    volume_type = "gp3"
+    encrypted   = true
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-sonarqube"
+    Role = "sonarqube"
+  })
+}

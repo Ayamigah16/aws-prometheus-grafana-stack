@@ -2,25 +2,13 @@
 # =============================================================================
 # Ansible role: sonarqube
 #
-# Deploys SonarQube Community 9.9 LTS + PostgreSQL 15 via Docker Compose on
-# the monitoring host.
-#
-# Why co-locate with the monitoring stack?
-#   • Reduces EC2 cost — one fewer instance.
-#   • SonarQube's own metrics (JVM heap, scan queue depth) are already
-#     scraped by the Node Exporter on the same host.
+# Deploys SonarQube Community 9.9 LTS + PostgreSQL 15 via Docker Compose.
+# Runs on a dedicated EC2 instance (sonarqube group in inventory).
 #
 # Pre-requisites
-#   • Docker daemon running (installed by the `common` role).
-#   • vm.max_map_count ≥ 262144 (set below — required by Elasticsearch which
-#     SonarQube embeds for its search index).
-#   • Port 9000 open in the monitoring security group for Jenkins to reach the
-#     SonarQube API.
-#
-# ⚠️  Instance sizing: t3.medium (4 GB RAM) is the absolute minimum.
-#     t3.large (8 GB) is strongly recommended when running SonarQube alongside
-#     Prometheus + Grafana + Jaeger.  Set monitoring_instance_type in
-#     terraform.tfvars to "t3.large" before applying.
+#   • Docker daemon (installed by this role).
+#   • vm.max_map_count ≥ 262144 (set below — required by Elasticsearch).
+#   • Port 9000 open in the sonarqube security group.
 # =============================================================================
 
 # ---------------------------------------------------------------------------

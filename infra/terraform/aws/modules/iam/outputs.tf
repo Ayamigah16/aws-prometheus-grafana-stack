@@ -9,3 +9,7 @@ output "deploy_instance_profile_name" {
 output "monitoring_instance_profile_name" {
   value = aws_iam_instance_profile.monitoring.name
 }
+
+output "sonarqube_instance_profile_name" {
+  value = aws_iam_instance_profile.sonarqube.name
+}
