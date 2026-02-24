@@ -279,8 +279,11 @@ pipeline {
                                 set -euo pipefail
                                 echo "=== OWASP Dependency-Check SCA (deep gate) ==="
                                 mkdir -p "${DC_DATA_DIR}" "${REPORTS_DIR}"
-                                # Remove stale H2 lock file only — preserves NVD data cache
-                                find "${DC_DATA_DIR}" -name "*.lock.db" -delete 2>/dev/null || true
+                                # Delete H2 database files corrupted by previous interrupted runs.
+                                # Raw NVD JSON/XML files are preserved so DC rebuilds its index
+                                # from the local cache instead of re-downloading (~250 MB).
+                                find "${DC_DATA_DIR}" -name "*.mv.db"  -delete 2>/dev/null || true
+                                find "${DC_DATA_DIR}" -name "*.h2.db"  -delete 2>/dev/null || true
 
                                 docker run --rm \
                                   -v "${PWD}/app:/src:ro" \
