@@ -108,7 +108,7 @@ pipeline {
                      'ECS_CLUSTER_NAME', 'ECS_SERVICE_NAME',
                      'ECS_EXECUTION_ROLE_ARN', 'ECS_TASK_ROLE_ARN',
                      'ALB_DNS_NAME'].each { v ->
-                        if (!env[v]?.trim()) missing << v
+                        if (!env.getProperty(v)?.trim()) missing << v
                     }
                     if (!missing.isEmpty()) {
                         error("Missing required Jenkins global env vars: ${missing.join(', ')}")
