@@ -88,7 +88,7 @@
     group: root
     mode: "0750"
 
-- name: Create SonarQube data sub-directories
+- name: Create SonarQube data sub-directories (SonarQube UID 1000)
   ansible.builtin.file:
     path: "{{ sonarqube_base_dir }}/{{ item }}"
     state: directory
@@ -99,7 +99,17 @@
     - data
     - logs
     - extensions
-    - postgres
+
+# PostgreSQL Alpine container runs as UID 70 (postgres user).
+# Do NOT pre-create the postgres dir as UID 1000 — the entrypoint must own it.
+# If it already exists with wrong ownership, fix it; otherwise Docker creates it.
+- name: Ensure postgres data directory is owned by PostgreSQL (UID 70)
+  ansible.builtin.file:
+    path: "{{ sonarqube_base_dir }}/postgres"
+    state: directory
+    owner: "70"     # Alpine postgres user UID
+    group: "70"
+    mode: "0750"
 
 # ---------------------------------------------------------------------------
 # Deploy Compose file

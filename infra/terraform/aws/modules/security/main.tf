@@ -288,39 +288,3 @@ resource "aws_security_group_rule" "ecs_metrics_from_monitoring" {
   security_group_id        = aws_security_group.ecs_tasks.id
   source_security_group_id = aws_security_group.monitoring.id
 }
-
-# ---------------------------------------------------------------------------
-# SonarQube Security Group
-# ---------------------------------------------------------------------------
-resource "aws_security_group" "sonarqube" {
-  name        = "${var.project_name}-sonarqube-sg"
-  description = "SonarQube SAST server: port 9000 from admin and Jenkins"
-  vpc_id      = var.vpc_id
-
-  ingress {
-    description = "SSH from admin network"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = var.admin_cidrs
-  }
-
-  ingress {
-    description = "SonarQube UI from admin network"
-    from_port   = 9000
-    to_port     = 9000
-    protocol    = "tcp"
-    cidr_blocks = var.admin_cidrs
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = merge(var.tags, {
-    Name = "${var.project_name}-sonarqube-sg"
-  })
-}
