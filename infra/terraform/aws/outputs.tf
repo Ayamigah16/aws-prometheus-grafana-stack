@@ -26,14 +26,6 @@ output "monitoring_public_dns" {
   value = module.compute.monitoring_public_dns
 }
 
-output "sonarqube_public_ip" {
-  value = module.compute.sonarqube_public_ip
-}
-
-output "sonarqube_public_dns" {
-  value = module.compute.sonarqube_public_dns
-}
-
 output "cloudtrail_bucket" {
   value = module.security_services.cloudtrail_bucket_name
 }

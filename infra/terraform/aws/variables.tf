@@ -58,12 +58,6 @@ variable "monitoring_instance_type" {
   default     = "t3.small"
 }
 
-variable "sonarqube_instance_type" {
-  description = "Instance type for dedicated SonarQube server"
-  type        = string
-  default     = "t3.medium"
-}
-
 variable "ecr_repository_name" {
   description = "ECR repository name for application image"
   type        = string

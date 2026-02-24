@@ -54,18 +54,6 @@ variable "monitoring_instance_profile_name" {
   type = string
 }
 
-variable "sonarqube_instance_type" {
-  type = string
-}
-
-variable "sonarqube_security_group_id" {
-  type = string
-}
-
-variable "sonarqube_instance_profile_name" {
-  type = string
-}
-
 variable "tags" {
   type = map(string)
 }

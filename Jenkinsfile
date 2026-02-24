@@ -5,13 +5,13 @@
 //   • Gitleaks       — any secret/credential committed to git
 //   • pip-audit      — SCA fast gate: PyPI/OSV CVEs in requirements (fails early)
 //   • OWASP DC       — SCA deep scan: NVD database, CVSS ≥ 7 gate
-//   • SonarQube QG   — SAST Quality Gate (security hotspots, bugs, coverage)
+//   • SonarCloud QG  — SAST Quality Gate (security hotspots, bugs, coverage)
 //   • Trivy          — container image CRITICAL/HIGH CVEs (fixed or unfixed)
 //
 // SAST strategy:
 //   Pre-commit  →  Bandit (HIGH severity, blocks commit on dev workstation)
-//   CI          →  Bandit (report-only, feeds SonarQube)
-//                  SonarQube scanner → Quality Gate (blocks pipeline)
+//   CI          →  Bandit (report-only, feeds SonarCloud)
+//                  SonarCloud scanner → Quality Gate (blocks pipeline)
 //   The Quality Gate is the single authoritative CI/CD gate for code quality.
 //
 // SCA strategy (layered):
@@ -55,9 +55,10 @@ pipeline {
         SYFT_IMAGE           = 'anchore/syft:v1.19.0'
         SONAR_SCANNER_IMAGE  = 'sonarsource/sonar-scanner-cli:5.0.1'
         OWASP_DC_IMAGE       = 'owasp/dependency-check:10.0.4'
-        // Name of the SonarQube server configured in:
+        // Name of the SonarCloud server entry configured in:
         // Jenkins → Manage Jenkins → Configure System → SonarQube servers
-        SONARQUBE_ENV_NAME   = 'SonarQube'
+        // URL: https://sonarcloud.io  Token: sonar-auth-token (SonarCloud user token)
+        SONARQUBE_ENV_NAME   = 'SonarCloud'
         REPORTS_DIR          = 'reports'
     }
 
@@ -331,22 +332,22 @@ pipeline {
         }
 
         // -------------------------------------------------------------------
-        stage('SAST — SonarQube') {
+        stage('SAST — SonarCloud') {
         // -------------------------------------------------------------------
-        // Runs the SonarQube scanner, importing:
+        // Runs the SonarCloud scanner, importing:
         //   • bandit-report.json  (security findings from Bandit)
         //   • coverage.xml        (test coverage from pytest-cov)
         //
-        // The scanner sends results to SonarQube then waits for the server to
+        // The scanner sends results to SonarCloud then waits for the server to
         // compute the Quality Gate verdict (sonar.qualitygate.wait=true in
         // sonar-project.properties).  A failing Quality Gate exits non-zero
         // here, blocking the pipeline before the Docker build runs.
         //
         // Jenkins pre-requisites:
         //   1. SonarQube Scanner plugin installed.
-        //   2. Server configured: Manage Jenkins → Configure System →
-        //      SonarQube servers  (name must match SONARQUBE_ENV_NAME).
-        //   3. Credentials: a SonarQube token stored as a Secret Text with
+        //   2. SonarCloud server entry: Manage Jenkins → Configure System →
+        //      SonarQube servers  (name = 'SonarCloud', URL = https://sonarcloud.io).
+        //   3. Credentials: a SonarCloud user token stored as a Secret Text with
         //      ID "sonar-auth-token".
         // -------------------------------------------------------------------
             steps {
@@ -356,11 +357,11 @@ pipeline {
                 ) {
                     sh '''
                         set -euo pipefail
-                        echo "=== SonarQube SAST scan ==="
-                        # Run scanner in Docker — inherits SONAR_HOST_URL and
-                        # SONAR_TOKEN injected by withSonarQubeEnv() into env.
+                        echo "=== SonarCloud SAST scan ==="
+                        # Run scanner in Docker — inherits SONAR_HOST_URL
+                        # (https://sonarcloud.io) and SONAR_TOKEN injected
+                        # by withSonarQubeEnv() into env.
                         docker run --rm \
-                          --network host \
                           -v "$PWD:/workspace" \
                           -w /workspace \
                           -e SONAR_HOST_URL \
@@ -369,7 +370,7 @@ pipeline {
                             sonar-scanner \
                               -Dsonar.projectVersion="${BUILD_NUMBER}" \
                               -Dsonar.working.directory="${REPORTS_DIR}/.scannerwork"
-                        echo "SonarQube scan submitted successfully."
+                        echo "SonarCloud scan submitted successfully."
                     '''
                 }
             }
@@ -378,11 +379,11 @@ pipeline {
         // -------------------------------------------------------------------
         stage('Quality Gate') {
         // -------------------------------------------------------------------
-        // Waits for SonarQube to compute the Quality Gate result (via webhook
+        // Waits for SonarCloud to compute the Quality Gate result (via webhook
         // or polling).  Aborts the pipeline if the gate fails.
         //
-        // SonarQube webhook setup (one-time, required for fast feedback):
-        //   SonarQube UI → Administration → Webhooks → Create
+        // SonarCloud webhook setup (one-time, required for fast feedback):
+        //   SonarCloud UI → Project → Administration → Webhooks → Create
         //   URL: http://<jenkins-host>:8080/sonarqube-webhook/
         //
         // Alternatively, sonar.qualitygate.wait=true in sonar-project.properties

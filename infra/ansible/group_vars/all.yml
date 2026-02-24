@@ -57,19 +57,7 @@ jaeger_otlp_http_port: 4318
 jaeger_ui_port: 16686
 jaeger_metrics_port: 14269
 
-# ---------------------------------------------------------------------------
-# SonarQube — SAST / Quality Gate
-# ---------------------------------------------------------------------------
-sonarqube_version: "community"   # rolling tag = latest Community edition (26.x / 2026 series)
-sonarqube_port: 9000
-sonarqube_db_password: "{{ vault_sonarqube_db_password }}"
-# JVM heap for SonarQube Web + CE processes
-sonarqube_jvm_xmx: "512m"
-sonarqube_jvm_xms: "128m"
-# Elasticsearch REQUIRES Xms == Xmx (bootstrap check enforced)
-sonarqube_es_jvm_xmx: "512m"
-sonarqube_es_jvm_xms: "512m"
-
+# SonarQube self-hosted vars removed — project now uses SonarCloud (SaaS).
 # ---------------------------------------------------------------------------
 # AWS / CloudWatch
 # ---------------------------------------------------------------------------

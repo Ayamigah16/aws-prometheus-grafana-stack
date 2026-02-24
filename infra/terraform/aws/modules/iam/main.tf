@@ -116,25 +116,3 @@ resource "aws_iam_instance_profile" "monitoring" {
   name = "${var.project_name}-monitoring-instance-profile"
   role = aws_iam_role.monitoring.name
 }
-
-# ---------------------------------------------------------------------------
-# SonarQube role: dedicated SAST server
-# Permissions: SSM (management) only — SonarQube has no AWS API needs
-# ---------------------------------------------------------------------------
-
-resource "aws_iam_role" "sonarqube" {
-  name               = "${var.project_name}-sonarqube-role"
-  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
-
-  tags = var.tags
-}
-
-resource "aws_iam_role_policy_attachment" "sonarqube_ssm" {
-  role       = aws_iam_role.sonarqube.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
-
-resource "aws_iam_instance_profile" "sonarqube" {
-  name = "${var.project_name}-sonarqube-instance-profile"
-  role = aws_iam_role.sonarqube.name
-}
