@@ -345,7 +345,7 @@ pipeline {
         // -------------------------------------------------------------------
             steps {
                 withSonarQubeEnv(
-                    credentialsId:    'SONAR_TOKEN',
+                    credentialsId:    'sonar-auth-token',
                     installationName: env.SONARQUBE_ENV_NAME
                 ) {
                     sh '''
