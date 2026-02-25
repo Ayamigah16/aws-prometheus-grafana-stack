@@ -214,17 +214,22 @@ pipeline {
                                 mkdir -p "${REPORTS_DIR}"
                                 docker run --rm \
                                   -u "$(id -u):$(id -g)" \
-                                  --entrypoint snyk \
+                                  --entrypoint sh \
                                   -e HOME=/tmp \
                                   -e SNYK_TOKEN="${SNYK_TOKEN}" \
-                                  -v "${PWD}/app:/workspace:ro" \
-                                  -v "${PWD}/${REPORTS_DIR}:/report" \
+                                  -e SNYK_SEVERITY_THRESHOLD="${SNYK_SEVERITY_THRESHOLD}" \
+                                  -e REPORTS_DIR="${REPORTS_DIR}" \
+                                  -v "${PWD}:/workspace" \
+                                  -w /workspace \
                                   "${SNYK_IMAGE}" \
-                                    test \
-                                      --file=/workspace/requirements.txt \
-                                      --package-manager=pip \
-                                      --severity-threshold="${SNYK_SEVERITY_THRESHOLD}" \
-                                      --json-file-output=/report/snyk-sca-report.json
+                                    -lc '
+                                      . /workspace/.venv/bin/activate
+                                      snyk test \
+                                        --file=/workspace/app/requirements.txt \
+                                        --package-manager=pip \
+                                        --severity-threshold="${SNYK_SEVERITY_THRESHOLD}" \
+                                        --json-file-output=/workspace/${REPORTS_DIR}/snyk-sca-report.json
+                                    '
                                 echo "Snyk: no vulnerabilities at/above '${SNYK_SEVERITY_THRESHOLD}' — gate passed."
                             '''
                         }
