@@ -97,11 +97,11 @@ docker-compose.override.yml
 # =============================================================================
 
 # Keep README placeholders but ignore actual image captures
-screenshots/**/*.png
-screenshots/**/*.jpg
-screenshots/**/*.jpeg
-screenshots/**/*.gif
-screenshots/**/*.mp4
+# screenshots/**/*.png
+# screenshots/**/*.jpg
+# screenshots/**/*.jpeg
+# screenshots/**/*.gif
+# screenshots/**/*.mp4
 
 # =============================================================================
 # OS / editor artefacts
