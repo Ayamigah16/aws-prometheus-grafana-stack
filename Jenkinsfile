@@ -351,6 +351,9 @@ pipeline {
                     sh '''
                         set -euo pipefail
                         echo "=== SonarCloud SAST scan ==="
+                        echo "DEBUG: SONAR_HOST_URL=${SONAR_HOST_URL}"
+                        echo "DEBUG: SONAR_TOKEN length=$(echo -n "${SONAR_TOKEN}" | wc -c)"
+                        echo "DEBUG: token validate=$(curl -sf -u "${SONAR_TOKEN}:" https://sonarcloud.io/api/authentication/validate || echo FAILED)"
                         # Run scanner in Docker — inherits SONAR_HOST_URL
                         # (https://sonarcloud.io) and SONAR_TOKEN injected
                         # by withSonarQubeEnv() into env.
