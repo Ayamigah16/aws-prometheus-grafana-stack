@@ -17,9 +17,16 @@ regexes = [
 ]
 
 # Encrypted vault file — the entire file is ciphertext, not plaintext secrets.
+# SSH key pair used by Jenkins pipeline — private key is gitignored, public key is safe.
+# Terraform state files are gitignored but scanned locally by --no-git.
 paths = [
   "infra/ansible/group_vars/all/vault.yml",
   "infra/ansible/group_vars/all/vault.yml.example",
+  "infra/keys/jenkins-pipeline-key.pem",
+  "infra/terraform/bootstrap/terraform.tfstate",
+  "infra/terraform/bootstrap/terraform.tfstate.backup",
+  "infra/terraform/aws/terraform.tfstate",
+  "infra/terraform/aws/terraform.tfstate.backup",
 ]
 
 # ---------------------------------------------------------------------------
