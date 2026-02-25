@@ -11,6 +11,8 @@ data "aws_iam_policy_document" "ec2_assume_role" {
   }
 }
 
+data "aws_caller_identity" "current" {}
+
 resource "aws_iam_role" "jenkins" {
   name               = "${var.project_name}-jenkins-role"
   assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
@@ -33,6 +35,46 @@ resource "aws_iam_role_policy_attachment" "jenkins_ecr" {
 resource "aws_iam_role_policy_attachment" "jenkins_ssm" {
   role       = aws_iam_role.jenkins.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+data "aws_iam_policy_document" "jenkins_ecs_deploy" {
+  statement {
+    sid    = "EcsDeployPipelineActions"
+    effect = "Allow"
+    actions = [
+      "ecs:RegisterTaskDefinition",
+      "ecs:UpdateService",
+      "ecs:DescribeServices",
+      "ecs:DescribeTaskDefinition",
+      "ecs:ListTaskDefinitions",
+      "ecs:DeregisterTaskDefinition",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "PassOnlyEcsTaskRoles"
+    effect = "Allow"
+    actions = [
+      "iam:PassRole",
+    ]
+    resources = [
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-ecs-execution-role",
+      "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-ecs-task-role",
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["ecs-tasks.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "jenkins_ecs_deploy" {
+  name   = "${var.project_name}-jenkins-ecs-deploy"
+  role   = aws_iam_role.jenkins.id
+  policy = data.aws_iam_policy_document.jenkins_ecs_deploy.json
 }
 
 resource "aws_iam_role_policy_attachment" "deploy_ecr_readonly" {

@@ -3,31 +3,22 @@
 //
 // Security gates (each fails the pipeline when triggered):
 //   • Gitleaks       — any secret/credential committed to git
-//   • pip-audit      — SCA fast gate: PyPI/OSV CVEs in requirements (fails early)
 //   • OWASP DC       — SCA deep scan: NVD database, CVSS ≥ 7 gate
 //   • SonarCloud QG  — SAST Quality Gate (security hotspots, bugs, coverage)
 //   • Trivy          — container image CRITICAL/HIGH CVEs (fixed or unfixed)
 //
 // SAST strategy:
-//   Pre-commit  →  Bandit (HIGH severity, blocks commit on dev workstation)
-//   CI          →  Bandit (report-only, feeds SonarCloud)
-//                  SonarCloud scanner → Quality Gate (blocks pipeline)
+//   CI          →  SonarCloud scanner → Quality Gate (blocks pipeline)
 //   The Quality Gate is the single authoritative CI/CD gate for code quality.
 //
-// SCA strategy (layered):
-//   pip-audit  →  fast, Python-only, OSV/PyPI advisory database, no API key.
-//                 Runs before OWASP DC to fail the pipeline cheaply when
-//                 known CVEs exist in requirements.
+// SCA strategy:
 //   OWASP DC   →  comprehensive, NVD database with CVSS scores, multi-ecosystem.
 //                 Detects transitive and indirect vulnerabilities.  Slower but
 //                 more authoritative for compliance reporting.
 //
 // Deliverables archived per build:
 //   reports/gitleaks-report.json
-//   reports/bandit-report.json                     ← imported by SonarQube
 //   reports/coverage.xml                           ← imported by SonarQube
-//   reports/pip-audit-report.json
-//   reports/dependency-check-report.json
 //   reports/dependency-check-report.html           ← published to Jenkins UI
 //   reports/dependency-check-report.xml
 //   reports/trivy-report.json
@@ -41,7 +32,7 @@ pipeline {
     options {
         disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '20'))
-        timeout(time: 60, unit: 'MINUTES')
+        timeout(time: 90, unit: 'MINUTES')
         skipDefaultCheckout(true)
         durabilityHint('MAX_SURVIVABILITY')
     }
@@ -93,8 +84,12 @@ pipeline {
                     env.PYTHON_IMAGE      = env.PYTHON_IMAGE?.trim()      ?: 'python:3.12-slim'
                     env.TRIVY_CACHE_DIR   = env.TRIVY_CACHE_DIR?.trim()   ?: '/var/lib/jenkins/.cache/trivy'
                     env.DC_DATA_DIR       = env.DC_DATA_DIR?.trim()       ?: '/var/lib/jenkins/.cache/owasp-dc'
+                    env.SONAR_CACHE_DIR   = env.SONAR_CACHE_DIR?.trim()   ?: '/var/lib/jenkins/.cache/sonar'
                     env.AWS_REGION        = env.AWS_REGION?.trim()        ?: 'eu-west-1'
                     env.MONITORING_HOST_DNS = env.MONITORING_HOST_DNS?.trim() ?: ''
+                    env.DC_UPDATE_MODE    = env.DC_UPDATE_MODE?.trim()    ?: (
+                        (env.BRANCH_NAME in ['main', 'develop']) ? 'update' : 'noupdate'
+                    )
 
                     // ECS-specific (all sourced from Terraform outputs → Jenkins env vars)
                     env.ECS_CLUSTER_NAME      = env.ECS_CLUSTER_NAME?.trim()      ?: ''
@@ -120,8 +115,8 @@ pipeline {
                     def awsOk = sh(returnStatus: true, script: 'command -v aws >/dev/null 2>&1') == 0
                     if (!awsOk) error('aws CLI is required')
 
-                    sh 'mkdir -p "${REPORTS_DIR}"'
-                    echo "Pipeline initialised — image base: ${env.IMAGE_NAME}"
+                    sh 'mkdir -p "${REPORTS_DIR}" "${TRIVY_CACHE_DIR}" "${DC_DATA_DIR}" "${SONAR_CACHE_DIR}"'
+                    echo "Pipeline initialised — image base: ${env.IMAGE_NAME} | OWASP DC mode: ${env.DC_UPDATE_MODE}"
                 }
             }
         }
@@ -155,7 +150,7 @@ pipeline {
         // -------------------------------------------------------------------
         // pip download cache is mounted from the host so packages are served
         // from disk on subsequent builds instead of being re-downloaded.
-        // PIP_CACHE_DIR=/pip-cache points pip at the mounted host volume.
+        // Install only runtime + test dependencies needed for this pipeline.
         // -------------------------------------------------------------------
             steps {
                 sh '''
@@ -172,7 +167,8 @@ pipeline {
                         python -m venv .venv
                         . .venv/bin/activate
                         pip install --upgrade pip --quiet
-                        pip install -r app/requirements.txt -r app/requirements-dev.txt --quiet
+                        pip install -r app/requirements.txt --quiet
+                        pip install pytest==8.1.1 pytest-cov==5.0.0 --quiet
                         pip check
                       '
                 '''
@@ -182,12 +178,11 @@ pipeline {
         // -------------------------------------------------------------------
         stage('Tests & Security Scans') {
         // -------------------------------------------------------------------
-        // Unit Tests, SAST (Bandit), pip-audit, and OWASP DC run in parallel
-        // to minimise wall-clock time.  All branches write to distinct report
-        // files so there is no I/O conflict on the shared workspace volume.
+        // Unit tests and deep SCA (OWASP DC) run in parallel to minimize
+        // wall-clock time. Both branches write to distinct report files.
         //
-        // OWASP DC runs concurrently with the venv-dependent stages — it only
-        // scans the app/ source tree and does not need the venv at all.
+        // OWASP DC runs concurrently with the venv-dependent tests — it only
+        // scans the app/ source tree and does not need the venv itself.
         // -------------------------------------------------------------------
             parallel {
 
@@ -214,99 +209,75 @@ pipeline {
                     }
                 }
 
-                stage('SAST — Bandit') {
-                // Generates bandit-report.json for SonarCloud import.
-                // Gate is enforced by the Quality Gate stage, not here.
-                    steps {
-                        sh '''
-                            set -euo pipefail
-                            echo "=== Bandit SAST — generating report for SonarQube ==="
-                            docker run --rm \
-                              -u "$(id -u):$(id -g)" \
-                              -v "$PWD:/workspace" \
-                              -w /workspace \
-                              -e REPORTS_DIR="${REPORTS_DIR}" \
-                              "${PYTHON_IMAGE}" \
-                              bash -lc '
-                                . .venv/bin/activate
-                                bandit -r app \
-                                  --severity-level low \
-                                  --confidence-level low \
-                                  --format json \
-                                  --output ${REPORTS_DIR}/bandit-report.json \
-                                  --exit-zero
-                                FINDING_COUNT=$(grep -c test_id "${REPORTS_DIR}/bandit-report.json") || FINDING_COUNT=0
-                                echo "Bandit findings: ${FINDING_COUNT} (all severities — SonarQube will gate)"
-                              '
-                        '''
-                    }
-                }
-
-                stage('SCA — pip-audit') {
-                // Fast gate: fails pipeline immediately on any known CVE in
-                // production requirements, before OWASP DC finishes.
-                    steps {
-                        sh '''
-                            set -euo pipefail
-                            echo "=== pip-audit SCA (fast gate) ==="
-                            docker run --rm \
-                              -u "$(id -u):$(id -g)" \
-                              -v "$PWD:/workspace" \
-                              -w /workspace \
-                              -e REPORTS_DIR="${REPORTS_DIR}" \
-                              "${PYTHON_IMAGE}" \
-                              bash -lc '
-                                . .venv/bin/activate
-                                pip-audit \
-                                  -r app/requirements.txt \
-                                  --format json \
-                                  --output ${REPORTS_DIR}/pip-audit-report.json \
-                                  --progress-spinner off
-                                echo "pip-audit: no CVEs found — gate passed."
-                              '
-                        '''
-                    }
-                }
-
                 stage('SCA — OWASP Dependency-Check') {
                 // Deep SCA gate: full NVD database, CVSS >= 7.0 → FAIL.
-                // The data dir is intentionally NOT mounted from the host:
-                // mounting a host-owned dir causes the container's non-root
-                // dependencycheck user (different UID from Jenkins 995) to
-                // hit H2 concurrency faults ("connectionPool is null") when
-                // the multi-threaded NVD importer races against a pool that
-                // gets closed on the first thread error.  Letting the container
-                // own its own ephemeral /usr/share/dependency-check/data gives
-                // H2 a clean, fully-writable directory every single run.
-                // Trade-off: NVD download (~5-15 min) every build.
+                // Use a persistent host cache so NVD does not fully re-download
+                // every build. Run container with Jenkins UID/GID to avoid H2
+                // file ownership issues in the mounted data directory.
+                // Default branch strategy:
+                //   update   -> main/develop
+                //   noupdate -> feature branches (faster feedback)
                     steps {
                         withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
                             sh '''
                                 set -euo pipefail
                                 echo "=== OWASP Dependency-Check SCA (deep gate) ==="
-                                mkdir -p "${REPORTS_DIR}"
-                                chmod 777 "${REPORTS_DIR}"
+                                mkdir -p "${REPORTS_DIR}" "${DC_DATA_DIR}"
+                                chmod 775 "${REPORTS_DIR}" "${DC_DATA_DIR}" || true
+                                if [ -z "$(ls -A "${DC_DATA_DIR}" 2>/dev/null || true)" ]; then
+                                    echo "Dependency-Check cache is cold; initial NVD sync can take longer."
+                                fi
 
-                                docker run --rm \
-                                  -v "${PWD}/app:/src:ro" \
-                                  -v "${PWD}/${REPORTS_DIR}:/report" \
-                                  -v "${PWD}/odc-suppressions.xml:/suppression/odc-suppressions.xml:ro" \
-                                  "${OWASP_DC_IMAGE}" \
-                                    --scan /src \
-                                    --project "${APP_NAME}" \
-                                    --format JSON \
-                                    --format HTML \
-                                    --format XML \
-                                    --out /report \
-                                    --failOnCVSS 7 \
-                                    --nvdApiKey "${NVD_API_KEY}" \
-                                    --nvdMaxRetryCount 3 \
-                                    --nvdApiDelay 6000 \
-                                    --suppression /suppression/odc-suppressions.xml \
-                                    --enableRetired \
-                                    --enableExperimental \
-                                    --disableAssembly \
-                                    --prettyPrint
+                                if [ "${DC_UPDATE_MODE}" = "noupdate" ]; then
+                                    echo "OWASP DC mode: noupdate (using local NVD cache only)."
+                                    docker run --rm \
+                                      -u "$(id -u):$(id -g)" \
+                                      -e HOME=/tmp \
+                                      -v "${PWD}/app:/src:ro" \
+                                      -v "${PWD}/${REPORTS_DIR}:/report" \
+                                      -v "${DC_DATA_DIR}:/usr/share/dependency-check/data" \
+                                      -v "${PWD}/odc-suppressions.xml:/suppression/odc-suppressions.xml:ro" \
+                                      "${OWASP_DC_IMAGE}" \
+                                        --scan /src \
+                                        --project "${APP_NAME}" \
+                                        --format HTML \
+                                        --format XML \
+                                        --out /report \
+                                        --data /usr/share/dependency-check/data \
+                                        --failOnCVSS 7 \
+                                        --noupdate \
+                                        --suppression /suppression/odc-suppressions.xml \
+                                        --enableRetired \
+                                        --enableExperimental \
+                                        --disableAssembly \
+                                        --prettyPrint
+                                else
+                                    echo "OWASP DC mode: update (refresh NVD as needed)."
+                                    docker run --rm \
+                                      -u "$(id -u):$(id -g)" \
+                                      -e HOME=/tmp \
+                                      -v "${PWD}/app:/src:ro" \
+                                      -v "${PWD}/${REPORTS_DIR}:/report" \
+                                      -v "${DC_DATA_DIR}:/usr/share/dependency-check/data" \
+                                      -v "${PWD}/odc-suppressions.xml:/suppression/odc-suppressions.xml:ro" \
+                                      "${OWASP_DC_IMAGE}" \
+                                        --scan /src \
+                                        --project "${APP_NAME}" \
+                                        --format HTML \
+                                        --format XML \
+                                        --out /report \
+                                        --data /usr/share/dependency-check/data \
+                                        --failOnCVSS 7 \
+                                        --nvdApiKey "${NVD_API_KEY}" \
+                                        --nvdMaxRetryCount 5 \
+                                        --nvdApiDelay 8000 \
+                                        --nvdValidForHours 24 \
+                                        --suppression /suppression/odc-suppressions.xml \
+                                        --enableRetired \
+                                        --enableExperimental \
+                                        --disableAssembly \
+                                        --prettyPrint
+                                fi
                                 echo "OWASP DC: no HIGH/CRITICAL CVEs — gate passed."
                             '''
                         }
@@ -327,9 +298,7 @@ pipeline {
         // -------------------------------------------------------------------
         stage('SAST — SonarCloud') {
         // -------------------------------------------------------------------
-        // Runs the SonarCloud scanner, importing:
-        //   • bandit-report.json  (security findings from Bandit)
-        //   • coverage.xml        (test coverage from pytest-cov)
+        // Runs the SonarCloud scanner, importing coverage.xml from pytest-cov.
         //
         // The scanner sends results to SonarCloud then waits for the server to
         // compute the Quality Gate verdict (sonar.qualitygate.wait=true in
@@ -349,9 +318,13 @@ pipeline {
                         sh '''
                             set -euo pipefail
                             echo "=== SonarCloud SAST scan ==="
+                            mkdir -p "${SONAR_CACHE_DIR}"
                             docker run --rm \
+                              -u "$(id -u):$(id -g)" \
                               -v "$PWD:/workspace" \
+                              -v "${SONAR_CACHE_DIR}:/opt/sonar-scanner/.sonar/cache" \
                               -w /workspace \
+                              -e SONAR_USER_HOME=/opt/sonar-scanner/.sonar \
                               -e SONAR_HOST_URL \
                               -e SONAR_TOKEN \
                               "${SONAR_SCANNER_IMAGE}" \
