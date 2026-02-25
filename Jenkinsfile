@@ -228,55 +228,90 @@ pipeline {
                                     echo "Dependency-Check cache is cold; initial NVD sync can take longer."
                                 fi
 
-                                if [ "${DC_UPDATE_MODE}" = "noupdate" ]; then
-                                    echo "OWASP DC mode: noupdate (using local NVD cache only)."
-                                    docker run --rm \
-                                      -u "$(id -u):$(id -g)" \
-                                      -e HOME=/tmp \
-                                      -v "${PWD}/app:/src:ro" \
-                                      -v "${PWD}/${REPORTS_DIR}:/report" \
-                                      -v "${DC_DATA_DIR}:/usr/share/dependency-check/data" \
-                                      -v "${PWD}/odc-suppressions.xml:/suppression/odc-suppressions.xml:ro" \
-                                      "${OWASP_DC_IMAGE}" \
-                                        --scan /src \
-                                        --project "${APP_NAME}" \
-                                        --format HTML \
-                                        --format XML \
-                                        --out /report \
-                                        --data /usr/share/dependency-check/data \
-                                        --failOnCVSS 7 \
-                                        --noupdate \
-                                        --suppression /suppression/odc-suppressions.xml \
-                                        --enableRetired \
-                                        --enableExperimental \
-                                        --disableAssembly \
-                                        --prettyPrint
-                                else
-                                    echo "OWASP DC mode: update (refresh NVD as needed)."
-                                    docker run --rm \
-                                      -u "$(id -u):$(id -g)" \
-                                      -e HOME=/tmp \
-                                      -v "${PWD}/app:/src:ro" \
-                                      -v "${PWD}/${REPORTS_DIR}:/report" \
-                                      -v "${DC_DATA_DIR}:/usr/share/dependency-check/data" \
-                                      -v "${PWD}/odc-suppressions.xml:/suppression/odc-suppressions.xml:ro" \
-                                      "${OWASP_DC_IMAGE}" \
-                                        --scan /src \
-                                        --project "${APP_NAME}" \
-                                        --format HTML \
-                                        --format XML \
-                                        --out /report \
-                                        --data /usr/share/dependency-check/data \
-                                        --failOnCVSS 7 \
-                                        --nvdApiKey "${NVD_API_KEY}" \
-                                        --nvdMaxRetryCount 5 \
-                                        --nvdApiDelay 8000 \
-                                        --nvdValidForHours 24 \
-                                        --suppression /suppression/odc-suppressions.xml \
-                                        --enableRetired \
-                                        --enableExperimental \
-                                        --disableAssembly \
-                                        --prettyPrint
+                                DC_LOG="${REPORTS_DIR}/dependency-check.log"
+                                : > "${DC_LOG}"
+
+                                run_dc_scan() {
+                                    local mode="$1"
+                                    local rc=0
+
+                                    if [ "${mode}" = "noupdate" ]; then
+                                        echo "OWASP DC mode: noupdate (using local NVD cache only)."
+                                        docker run --rm \
+                                          -u "$(id -u):$(id -g)" \
+                                          -e HOME=/tmp \
+                                          -v "${PWD}/app:/src:ro" \
+                                          -v "${PWD}/${REPORTS_DIR}:/report" \
+                                          -v "${DC_DATA_DIR}:/usr/share/dependency-check/data" \
+                                          -v "${PWD}/odc-suppressions.xml:/suppression/odc-suppressions.xml:ro" \
+                                          "${OWASP_DC_IMAGE}" \
+                                            --scan /src \
+                                            --project "${APP_NAME}" \
+                                            --format HTML \
+                                            --format XML \
+                                            --out /report \
+                                            --data /usr/share/dependency-check/data \
+                                            --failOnCVSS 7 \
+                                            --noupdate \
+                                            --suppression /suppression/odc-suppressions.xml \
+                                            --enableRetired \
+                                            --enableExperimental \
+                                            --disableAssembly \
+                                            --prettyPrint \
+                                          2>&1 | tee -a "${DC_LOG}" || rc=$?
+                                    else
+                                        echo "OWASP DC mode: update (refresh NVD as needed)."
+                                        docker run --rm \
+                                          -u "$(id -u):$(id -g)" \
+                                          -e HOME=/tmp \
+                                          -v "${PWD}/app:/src:ro" \
+                                          -v "${PWD}/${REPORTS_DIR}:/report" \
+                                          -v "${DC_DATA_DIR}:/usr/share/dependency-check/data" \
+                                          -v "${PWD}/odc-suppressions.xml:/suppression/odc-suppressions.xml:ro" \
+                                          "${OWASP_DC_IMAGE}" \
+                                            --scan /src \
+                                            --project "${APP_NAME}" \
+                                            --format HTML \
+                                            --format XML \
+                                            --out /report \
+                                            --data /usr/share/dependency-check/data \
+                                            --failOnCVSS 7 \
+                                            --nvdApiKey "${NVD_API_KEY}" \
+                                            --nvdMaxRetryCount 5 \
+                                            --nvdApiDelay 8000 \
+                                            --nvdValidForHours 24 \
+                                            --suppression /suppression/odc-suppressions.xml \
+                                            --enableRetired \
+                                            --enableExperimental \
+                                            --disableAssembly \
+                                            --prettyPrint \
+                                          2>&1 | tee -a "${DC_LOG}" || rc=$?
+                                    fi
+
+                                    return "${rc}"
+                                }
+
+                                EFFECTIVE_MODE="${DC_UPDATE_MODE}"
+                                if [ "${EFFECTIVE_MODE}" = "noupdate" ] && [ ! -f "${DC_DATA_DIR}/odc.mv.db" ]; then
+                                    echo "No local dependency-check DB found; switching to update mode for bootstrap."
+                                    EFFECTIVE_MODE="update"
+                                fi
+
+                                if ! run_dc_scan "${EFFECTIVE_MODE}"; then
+                                    if grep -Eq "Incompatible or corrupt database found|Unable to connect to the dependency-check database" "${DC_LOG}"; then
+                                        echo "OWASP DC database cache is corrupt/incompatible. Purging cache and retrying once in update mode."
+                                        docker run --rm \
+                                          -u "$(id -u):$(id -g)" \
+                                          -e HOME=/tmp \
+                                          -v "${DC_DATA_DIR}:/usr/share/dependency-check/data" \
+                                          "${OWASP_DC_IMAGE}" \
+                                            --data /usr/share/dependency-check/data \
+                                            --purge
+                                        run_dc_scan "update"
+                                    else
+                                        echo "OWASP DC failed with a non-recoverable error."
+                                        exit 1
+                                    fi
                                 fi
                                 echo "OWASP DC: no HIGH/CRITICAL CVEs — gate passed."
                             '''
