@@ -110,3 +110,5 @@ repos:
     name: ansible-lint
     files: "^infra/ansible/"
     args: [ --profile=production ]
+    additional_dependencies:
+    - ansible-core>=2.16,<2.18
