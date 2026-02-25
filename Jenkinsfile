@@ -42,7 +42,7 @@ pipeline {
         GITLEAKS_IMAGE       = 'zricethezav/gitleaks:v8.24.0'
         TRIVY_IMAGE          = 'aquasec/trivy:0.60.0'
         SYFT_IMAGE           = 'anchore/syft:v1.19.0'
-        SNYK_IMAGE           = 'snyk/snyk-cli:latest'
+        SNYK_IMAGE           = 'snyk/snyk:python-3.12'
         SONAR_SCANNER_IMAGE  = 'sonarsource/sonar-scanner-cli:12.0'
         SNYK_SEVERITY_THRESHOLD = 'high'
         // Name of the SonarCloud server entry configured in:
