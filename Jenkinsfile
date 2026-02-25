@@ -358,6 +358,7 @@ pipeline {
                                 sonar-scanner \
                                   -Dsonar.organization="${SONARCLOUD_ORG}" \
                                   -Dsonar.projectVersion="${BUILD_NUMBER}" \
+                                  -Dsonar.qualitygate.wait=true \
                                   -Dsonar.working.directory="${REPORTS_DIR}/.scannerwork"
                             echo "SonarCloud scan submitted successfully."
                         '''
