@@ -5,6 +5,10 @@ opentelemetry-sdk==1.28.0
 opentelemetry-instrumentation-flask==0.49b0
 opentelemetry-instrumentation-requests==0.49b0
 opentelemetry-exporter-otlp-proto-grpc==1.28.0
+# Pin grpcio to a version that fixes CVE-2023-44487, CVE-2023-4785,
+# CVE-2023-33953 (all patched in grpcio >= 1.57.0; 1.66.0 used as a
+# comfortable safe pinning point well above all three fixed releases).
+grpcio>=1.66.0
 # opentelemetry-proto>=1.28.0 requires protobuf>=5.0,<6.0 ; 5.29.6 is the
 # first 5.x release that fixes CVE GHSA-7gcm-g887-7qv7.
 protobuf==5.29.6

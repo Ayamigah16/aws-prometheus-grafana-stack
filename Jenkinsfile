@@ -289,6 +289,7 @@ pipeline {
                                 docker run --rm \
                                   -v "${PWD}/app:/src:ro" \
                                   -v "${PWD}/${REPORTS_DIR}:/report" \
+                                  -v "${PWD}/odc-suppressions.xml:/suppression/odc-suppressions.xml:ro" \
                                   "${OWASP_DC_IMAGE}" \
                                     --scan /src \
                                     --project "${APP_NAME}" \
@@ -300,6 +301,7 @@ pipeline {
                                     --nvdApiKey "${NVD_API_KEY}" \
                                     --nvdMaxRetryCount 3 \
                                     --nvdApiDelay 6000 \
+                                    --suppression /suppression/odc-suppressions.xml \
                                     --enableRetired \
                                     --enableExperimental \
                                     --disableAssembly \
