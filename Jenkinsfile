@@ -59,6 +59,7 @@ pipeline {
         // Jenkins → Manage Jenkins → Configure System → SonarQube servers
         // URL: https://sonarcloud.io  Token: sonar-auth-token (SonarCloud user token)
         SONARQUBE_ENV_NAME   = 'SonarCloud'
+        SONARCLOUD_ORG       = 'ayamigah16'   // must match sonar.organization in sonar-project.properties
         REPORTS_DIR          = 'reports'
     }
 
@@ -360,6 +361,7 @@ pipeline {
                           -e SONAR_TOKEN \
                           "${SONAR_SCANNER_IMAGE}" \
                             sonar-scanner \
+                              -Dsonar.organization="${SONARCLOUD_ORG}" \
                               -Dsonar.projectVersion="${BUILD_NUMBER}" \
                               -Dsonar.working.directory="${REPORTS_DIR}/.scannerwork"
                         echo "SonarCloud scan submitted successfully."
