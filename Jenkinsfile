@@ -53,7 +53,7 @@ pipeline {
         GITLEAKS_IMAGE       = 'zricethezav/gitleaks:v8.24.0'
         TRIVY_IMAGE          = 'aquasec/trivy:0.60.0'
         SYFT_IMAGE           = 'anchore/syft:v1.19.0'
-        SONAR_SCANNER_IMAGE  = 'sonarsource/sonar-scanner-cli:5.0.1'
+        SONAR_SCANNER_IMAGE  = 'sonarsource/sonar-scanner-cli:12.0'
         OWASP_DC_IMAGE       = 'owasp/dependency-check:12.2.0'
         // Name of the SonarCloud server entry configured in:
         // Jenkins → Manage Jenkins → Configure System → SonarQube servers
