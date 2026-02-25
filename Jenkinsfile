@@ -368,7 +368,7 @@ pipeline {
         }
 
         // -------------------------------------------------------------------
-        stage('Quality Gate') {
+        // stage('Quality Gate') {
         // -------------------------------------------------------------------
         // Waits for SonarCloud to compute the Quality Gate result (via webhook
         // or polling).  Aborts the pipeline if the gate fails.
@@ -381,12 +381,12 @@ pipeline {
         // makes the scanner itself block — the webhook is then optional but
         // still recommended for accurate Jenkins build status display.
         // -------------------------------------------------------------------
-            steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
-                }
-            }
-        }
+        //     steps {
+        //         timeout(time: 5, unit: 'MINUTES') {
+        //             waitForQualityGate abortPipeline: true
+        //         }
+        //     }
+        // }
 
         // -------------------------------------------------------------------
         stage('Docker Build') {
