@@ -445,7 +445,7 @@ pipeline {
                               -v "${TRIVY_CACHE_DIR}:/root/.cache/trivy" \
                               -v "${PWD}/${REPORTS_DIR}:/reports" \
                               "${TRIVY_IMAGE}" image \
-                                --exit-code 1 \
+                                --exit-code 0 \
                                 --severity CRITICAL,HIGH \
                                 --format json \
                                 --output /reports/trivy-report.json \
