@@ -262,13 +262,13 @@ pipeline {
                         sh '''
                             set -euo pipefail
                             echo "=== SonarCloud SAST scan ==="
-                            mkdir -p "${SONAR_CACHE_DIR}"
+                            mkdir -p "${SONAR_CACHE_DIR}/cache"
                             docker run --rm \
                               -u "$(id -u):$(id -g)" \
                               -v "$PWD:/workspace" \
-                              -v "${SONAR_CACHE_DIR}:/opt/sonar-scanner/.sonar/cache" \
+                              -v "${SONAR_CACHE_DIR}:/sonar-cache" \
                               -w /workspace \
-                              -e SONAR_USER_HOME=/opt/sonar-scanner/.sonar \
+                              -e SONAR_USER_HOME=/sonar-cache \
                               -e SONAR_HOST_URL \
                               -e SONAR_TOKEN \
                               "${SONAR_SCANNER_IMAGE}" \
