@@ -3,7 +3,7 @@
 //
 // Security gates (each fails the pipeline when triggered):
 //   • Gitleaks       — any secret/credential committed to git
-//   • OWASP DC       — SCA deep scan: NVD database, CVSS ≥ 7 gate
+//   • Snyk           — SCA gate for open-source dependencies (HIGH/CRITICAL)
 //   • SonarCloud QG  — SAST Quality Gate (security hotspots, bugs, coverage)
 //   • Trivy          — container image CRITICAL/HIGH CVEs (fixed or unfixed)
 //
@@ -12,15 +12,13 @@
 //   The Quality Gate is the single authoritative CI/CD gate for code quality.
 //
 // SCA strategy:
-//   OWASP DC   →  comprehensive, NVD database with CVSS scores, multi-ecosystem.
-//                 Detects transitive and indirect vulnerabilities.  Slower but
-//                 more authoritative for compliance reporting.
+//   Snyk       →  dependency vulnerability scanning for Python requirements.
+//                 Gate fails on vulnerabilities at/above configured severity.
 //
 // Deliverables archived per build:
 //   reports/gitleaks-report.json
 //   reports/coverage.xml                           ← imported by SonarQube
-//   reports/dependency-check-report.html           ← published to Jenkins UI
-//   reports/dependency-check-report.xml
+//   reports/snyk-sca-report.json
 //   reports/trivy-report.json
 //   reports/sbom.json  (CycloneDX / Syft)
 //
@@ -44,8 +42,9 @@ pipeline {
         GITLEAKS_IMAGE       = 'zricethezav/gitleaks:v8.24.0'
         TRIVY_IMAGE          = 'aquasec/trivy:0.60.0'
         SYFT_IMAGE           = 'anchore/syft:v1.19.0'
+        SNYK_IMAGE           = 'snyk/snyk-cli:latest'
         SONAR_SCANNER_IMAGE  = 'sonarsource/sonar-scanner-cli:12.0'
-        OWASP_DC_IMAGE       = 'owasp/dependency-check:12.2.0'
+        SNYK_SEVERITY_THRESHOLD = 'high'
         // Name of the SonarCloud server entry configured in:
         // Jenkins → Manage Jenkins → Configure System → SonarQube servers
         // URL: https://sonarcloud.io  Token: sonar-auth-token (SonarCloud user token)
@@ -83,13 +82,9 @@ pipeline {
                     env.COVERAGE_MIN      = env.COVERAGE_MIN?.trim()      ?: '80'
                     env.PYTHON_IMAGE      = env.PYTHON_IMAGE?.trim()      ?: 'python:3.12-slim'
                     env.TRIVY_CACHE_DIR   = env.TRIVY_CACHE_DIR?.trim()   ?: '/var/lib/jenkins/.cache/trivy'
-                    env.DC_DATA_DIR       = env.DC_DATA_DIR?.trim()       ?: '/var/lib/jenkins/.cache/owasp-dc'
                     env.SONAR_CACHE_DIR   = env.SONAR_CACHE_DIR?.trim()   ?: '/var/lib/jenkins/.cache/sonar'
                     env.AWS_REGION        = env.AWS_REGION?.trim()        ?: 'eu-west-1'
                     env.MONITORING_HOST_DNS = env.MONITORING_HOST_DNS?.trim() ?: ''
-                    env.DC_UPDATE_MODE    = env.DC_UPDATE_MODE?.trim()    ?: (
-                        (env.BRANCH_NAME in ['main', 'develop']) ? 'update' : 'noupdate'
-                    )
 
                     // ECS-specific (all sourced from Terraform outputs → Jenkins env vars)
                     env.ECS_CLUSTER_NAME      = env.ECS_CLUSTER_NAME?.trim()      ?: ''
@@ -115,8 +110,8 @@ pipeline {
                     def awsOk = sh(returnStatus: true, script: 'command -v aws >/dev/null 2>&1') == 0
                     if (!awsOk) error('aws CLI is required')
 
-                    sh 'mkdir -p "${REPORTS_DIR}" "${TRIVY_CACHE_DIR}" "${DC_DATA_DIR}" "${SONAR_CACHE_DIR}"'
-                    echo "Pipeline initialised — image base: ${env.IMAGE_NAME} | OWASP DC mode: ${env.DC_UPDATE_MODE}"
+                    sh 'mkdir -p "${REPORTS_DIR}" "${TRIVY_CACHE_DIR}" "${SONAR_CACHE_DIR}"'
+                    echo "Pipeline initialised — image base: ${env.IMAGE_NAME}"
                 }
             }
         }
@@ -178,11 +173,10 @@ pipeline {
         // -------------------------------------------------------------------
         stage('Tests & Security Scans') {
         // -------------------------------------------------------------------
-        // Unit tests and deep SCA (OWASP DC) run in parallel to minimize
-        // wall-clock time. Both branches write to distinct report files.
+        // Unit tests and Snyk SCA run in parallel to minimize wall-clock time.
+        // Both branches write to distinct report files.
         //
-        // OWASP DC runs concurrently with the venv-dependent tests — it only
-        // scans the app/ source tree and does not need the venv itself.
+        // Snyk scans requirements manifest directly and does not need the venv.
         // -------------------------------------------------------------------
             parallel {
 
@@ -209,120 +203,30 @@ pipeline {
                     }
                 }
 
-                stage('SCA — OWASP Dependency-Check') {
-                // Deep SCA gate: full NVD database, CVSS >= 7.0 → FAIL.
-                // Use a persistent host cache so NVD does not fully re-download
-                // every build. Run container with Jenkins UID/GID to avoid H2
-                // file ownership issues in the mounted data directory.
-                // Default branch strategy:
-                //   update   -> main/develop
-                //   noupdate -> feature branches (faster feedback)
+                stage('SCA — Snyk') {
+                // SCA gate: fail build if Snyk finds vulnerabilities at/above
+                // SNYK_SEVERITY_THRESHOLD (default: high).
                     steps {
-                        withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                        withCredentials([string(credentialsId: 'snyk-auth-token', variable: 'SNYK_TOKEN')]) {
                             sh '''
                                 set -euo pipefail
-                                echo "=== OWASP Dependency-Check SCA (deep gate) ==="
-                                mkdir -p "${REPORTS_DIR}" "${DC_DATA_DIR}"
-                                chmod 775 "${REPORTS_DIR}" "${DC_DATA_DIR}" || true
-                                if [ -z "$(ls -A "${DC_DATA_DIR}" 2>/dev/null || true)" ]; then
-                                    echo "Dependency-Check cache is cold; initial NVD sync can take longer."
-                                fi
-
-                                DC_LOG="${REPORTS_DIR}/dependency-check.log"
-                                : > "${DC_LOG}"
-
-                                run_dc_scan() {
-                                    local mode="$1"
-                                    local rc=0
-
-                                    if [ "${mode}" = "noupdate" ]; then
-                                        echo "OWASP DC mode: noupdate (using local NVD cache only)."
-                                        docker run --rm \
-                                          -u "$(id -u):$(id -g)" \
-                                          -e HOME=/tmp \
-                                          -v "${PWD}/app:/src:ro" \
-                                          -v "${PWD}/${REPORTS_DIR}:/report" \
-                                          -v "${DC_DATA_DIR}:/usr/share/dependency-check/data" \
-                                          -v "${PWD}/odc-suppressions.xml:/suppression/odc-suppressions.xml:ro" \
-                                          "${OWASP_DC_IMAGE}" \
-                                            --scan /src \
-                                            --project "${APP_NAME}" \
-                                            --format HTML \
-                                            --format XML \
-                                            --out /report \
-                                            --data /usr/share/dependency-check/data \
-                                            --failOnCVSS 7 \
-                                            --noupdate \
-                                            --suppression /suppression/odc-suppressions.xml \
-                                            --enableRetired \
-                                            --enableExperimental \
-                                            --disableAssembly \
-                                            --prettyPrint \
-                                          2>&1 | tee -a "${DC_LOG}" || rc=$?
-                                    else
-                                        echo "OWASP DC mode: update (refresh NVD as needed)."
-                                        docker run --rm \
-                                          -u "$(id -u):$(id -g)" \
-                                          -e HOME=/tmp \
-                                          -v "${PWD}/app:/src:ro" \
-                                          -v "${PWD}/${REPORTS_DIR}:/report" \
-                                          -v "${DC_DATA_DIR}:/usr/share/dependency-check/data" \
-                                          -v "${PWD}/odc-suppressions.xml:/suppression/odc-suppressions.xml:ro" \
-                                          "${OWASP_DC_IMAGE}" \
-                                            --scan /src \
-                                            --project "${APP_NAME}" \
-                                            --format HTML \
-                                            --format XML \
-                                            --out /report \
-                                            --data /usr/share/dependency-check/data \
-                                            --failOnCVSS 7 \
-                                            --nvdApiKey "${NVD_API_KEY}" \
-                                            --nvdMaxRetryCount 5 \
-                                            --nvdApiDelay 8000 \
-                                            --nvdValidForHours 24 \
-                                            --suppression /suppression/odc-suppressions.xml \
-                                            --enableRetired \
-                                            --enableExperimental \
-                                            --disableAssembly \
-                                            --prettyPrint \
-                                          2>&1 | tee -a "${DC_LOG}" || rc=$?
-                                    fi
-
-                                    return "${rc}"
-                                }
-
-                                EFFECTIVE_MODE="${DC_UPDATE_MODE}"
-                                if [ "${EFFECTIVE_MODE}" = "noupdate" ] && [ ! -f "${DC_DATA_DIR}/odc.mv.db" ]; then
-                                    echo "No local dependency-check DB found; switching to update mode for bootstrap."
-                                    EFFECTIVE_MODE="update"
-                                fi
-
-                                if ! run_dc_scan "${EFFECTIVE_MODE}"; then
-                                    if grep -Eq "Incompatible or corrupt database found|Unable to connect to the dependency-check database" "${DC_LOG}"; then
-                                        echo "OWASP DC database cache is corrupt/incompatible. Purging cache and retrying once in update mode."
-                                        docker run --rm \
-                                          -u "$(id -u):$(id -g)" \
-                                          -e HOME=/tmp \
-                                          -v "${DC_DATA_DIR}:/usr/share/dependency-check/data" \
-                                          "${OWASP_DC_IMAGE}" \
-                                            --data /usr/share/dependency-check/data \
-                                            --purge
-                                        run_dc_scan "update"
-                                    else
-                                        echo "OWASP DC failed with a non-recoverable error."
-                                        exit 1
-                                    fi
-                                fi
-                                echo "OWASP DC: no HIGH/CRITICAL CVEs — gate passed."
+                                echo "=== Snyk SCA scan ==="
+                                mkdir -p "${REPORTS_DIR}"
+                                docker run --rm \
+                                  -u "$(id -u):$(id -g)" \
+                                  --entrypoint snyk \
+                                  -e HOME=/tmp \
+                                  -e SNYK_TOKEN="${SNYK_TOKEN}" \
+                                  -v "${PWD}/app:/workspace:ro" \
+                                  -v "${PWD}/${REPORTS_DIR}:/report" \
+                                  "${SNYK_IMAGE}" \
+                                    test \
+                                      --file=/workspace/requirements.txt \
+                                      --package-manager=pip \
+                                      --severity-threshold="${SNYK_SEVERITY_THRESHOLD}" \
+                                      --json-file-output=/report/snyk-sca-report.json
+                                echo "Snyk: no vulnerabilities at/above '${SNYK_SEVERITY_THRESHOLD}' — gate passed."
                             '''
-                        }
-                    }
-                    post {
-                        always {
-                            dependencyCheckPublisher(
-                                pattern: "${REPORTS_DIR}/dependency-check-report.xml",
-                                stopBuild: false
-                            )
                         }
                     }
                 }
