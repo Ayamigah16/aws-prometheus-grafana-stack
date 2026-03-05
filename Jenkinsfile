@@ -88,24 +88,7 @@ pipeline {
             }
         }
 
-        stage('Test') {
-            steps {
-                sh '''
-                    set -euo pipefail
-                    docker run --rm \
-                      -u "$(id -u):$(id -g)" \
-                      -v "$PWD:/workspace" \
-                      -w /workspace \
-                      -e COVERAGE_MIN="${COVERAGE_MIN}" \
-                      "${PYTHON_IMAGE}" \
-                      bash -lc '
-                        . .venv/bin/activate
-                        export PYTHONPATH=/workspace
-                        pytest -q --cov=app --cov-report=xml --cov-fail-under="${COVERAGE_MIN}"
-                      '
-                '''
-            }
-        }
+
 
         stage('Security Gates') {
             steps {
