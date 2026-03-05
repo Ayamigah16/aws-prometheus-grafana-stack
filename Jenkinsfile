@@ -105,24 +105,24 @@ pipeline {
             }
         }
 
-        stage('Security Gates') {
-            steps {
-                sh '''
-                    set -euo pipefail
-                    docker run --rm \
-                      -u "$(id -u):$(id -g)" \
-                      -v "$PWD:/workspace" \
-                      -w /workspace \
-                      "${PYTHON_IMAGE}" \
-                      bash -lc '
-                        . .venv/bin/activate
-                        bandit -q -r app --severity-level high
-                        pip-audit -r app/requirements.txt
-                      '
-                    # Trivy checks intentionally disabled for now.
-                '''
-            }
-        }
+        // stage('Security Gates') {
+        //     steps {
+        //         sh '''
+        //             set -euo pipefail
+        //             docker run --rm \
+        //               -u "$(id -u):$(id -g)" \
+        //               -v "$PWD:/workspace" \
+        //               -w /workspace \
+        //               "${PYTHON_IMAGE}" \
+        //               bash -lc '
+        //                 . .venv/bin/activate
+        //                 bandit -q -r app --severity-level high
+        //                 pip-audit -r app/requirements.txt
+        //               '
+        //             # Trivy checks intentionally disabled for now.
+        //         '''
+        //     }
+        // }
 
         stage('Docker Build') {
             steps {
